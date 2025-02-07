@@ -39,7 +39,6 @@ class HandlerOutboundMultipleCart
         add_shortcode('mc_saved_carts', [$this, 'mc_saved_carts_shortcode']);
         add_action('woocommerce_cart_is_empty', [$this, 'mc_add_saved_carts_to_cart_page']);
         add_action('woocommerce_before_cart', [$this, 'mc_add_saved_carts_to_cart_page'], 10); // Default priority
-        add_action('wp_ajax_mc_check_unsaved_items', [$this, 'mc_check_unsaved_items']);
         add_action('wp_ajax_mc_pre_toggle_saved_carts', [$this, 'mc_pre_toggle_saved_carts']);
         // Load saved cart handler
         add_action('wp_ajax_mc_load_saved_cart', [$this, 'mc_load_saved_cart']);
@@ -62,12 +61,47 @@ class HandlerOutboundMultipleCart
             wp_send_json_error(['message' => 'WooCommerce is not available.']);
             return;
         }
+
+        // Get confirmation status
+        $confirmed = isset($_POST['confirmed']) && $_POST['confirmed'] === 'yes';
         // Get the loaded cart name from the session
         $loaded_cart_name = WC()->session->get('mc_current_cart_name');
+
+        if ($confirmed && !$loaded_cart_name) {
+            // Get the current cart items
+            $current_cart_items = WC()->cart->get_cart();
+
+            foreach ($current_cart_items as $cart_item_key => $cart_item) {
+                $adjust_st = new WoocommerceSettingsCustomFields();
+
+                if (isset($cart_item['variation_id']) && $cart_item['variation_id'] !== 0 && isset($cart_item['variation'])) {
+                    foreach ($cart_item['variation'] as $attribute_key => $attribute_value) {
+                        $taxonomy = str_replace('attribute_', '', $attribute_key);
+                        $term = get_term_by('name', $attribute_value, $taxonomy);
+                        if ($term) {
+                            $term_quantity = get_term_meta($term->term_id, 'quantity', true);
+                            $adjust_quantity = $cart_item['quantity'] * (int)$term_quantity;
+                            $adjust_st->adjust_stock($cart_item['product_id'], $adjust_quantity);
+                        }
+                    }
+                } else {
+                    $adjust_st->adjust_stock($cart_item['product_id'], $cart_item['quantity']);
+                }
+            }
+
+            // Clear the current cart
+            WC()->cart->empty_cart();
+            // Send a success response
+            wp_send_json_success([
+                'message' => 'Cart cleared successfully.'
+            ]);
+        }
+
         if (!$loaded_cart_name) {
             wp_send_json_error(['message' => 'No saved cart is currently loaded.']);            
         }
-         // Retrieve the saved carts for the current user
+
+        // Retrieve the saved carts for the current user
         $user_id = get_current_user_id();
         $multi_carts = get_user_meta($user_id, 'mc_multi_carts', true);
         if (!isset($multi_carts[$loaded_cart_name])) {
@@ -169,49 +203,6 @@ class HandlerOutboundMultipleCart
     }
 
      
-
-    /**
-     * Shortcode to display "Save Cart" button.
-     *
-     * @return string HTML output for the save cart button.
-     */
-    /*public function mc_save_cart_button_shortcode()
-    {
-        if (is_user_logged_in()) {
-            $loaded_cart_name = WC()->session->get('mc_current_cart_name');
-
-            if ($loaded_cart_name) {
-                echo '<a href="' . esc_url(wc_get_page_permalink('shop')) . '" class="button return-to-shop" style="float: left;">' . __('Add to more items', 'woocommerce') . '</a>';
-                echo '<div id="mc-update-cart-section" style="display: none;">
-                        <button id="mc-update-saved-cart" class="button" data-cart-name="' . esc_attr($loaded_cart_name) . '">Update Saved Cart</button>
-                    </div>';
-                
-            } else {
-
-                ob_start();
-?>
-                <div id="mc-save-cart-btn" class="button" style="float: left;">Save to Cart</div>
-
-                <!-- Popup Form -->
-                <div id="mc-save-cart-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 300px; padding: 20px; background: #fff; box-shadow: 0 4px 8px rgba(0,0,0,0.2); z-index: 1000; border-radius: 5px;">
-                    <div style="text-align: right;">
-                        <button id="mc-close-cart-modal" style="background: none; border: none; font-size: 20px; cursor: pointer;">&times;</button>
-                    </div>
-                    <div>                        
-                        <input type="text" id="mc-cart-name" placeholder="Cart Name"  style="width: 100%; padding: 8px; margin-bottom: 15px;" />                        
-                        <button id="mc-save-cart-submit" class="button">Save</button>
-                    </div>
-                </div>
-
-                <!-- Background Overlay -->
-                <div id="mc-modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999;"></div>
-<?php
-                return ob_get_clean();
-            }
-        }
-    }
-*/
-    
     /**
      * AJAX handler to save the current cart under a specified name.
      */
@@ -307,14 +298,13 @@ class HandlerOutboundMultipleCart
     
         // Only store and add the notice if the cart is newly loaded
         $cart_name = WC()->session->get('mc_current_cart_name'); // Check if a cart name exists in the session
-    
+        //WC()->session->__unset('mc_current_cart_name');
         // Ensure the notice is displayed only once by checking a session variable set by WooCommerce
         if ($cart_name && !empty($cart_name)) {
             // Check if the notice has already been added for the session and if we are on the cart page
             if (is_cart()) {
                 wc_add_notice('<strong>You are viewing the saved cart: ' . esc_html($cart_name) . '</strong>', 'success');
-                WC()->session->set('mc_cart_notice_displayed', true); // Mark the notice as displayed
-            }
+                }
         }
     
         return ob_get_clean();
@@ -340,37 +330,6 @@ class HandlerOutboundMultipleCart
          
     }
 
-    function mc_check_unsaved_items()
-    {
-        if (!is_user_logged_in()) {
-            wp_send_json_error(['message' => 'User not logged in.']);
-            return;
-        }
-
-        $logger = wc_get_logger(); 
-
-        $loaded_cart_name = WC()->session->get('mc_current_cart_name');
-        $current_cart_items = WC()->cart->get_cart();
-
-        if (!empty($current_cart_items) && isset($current_cart_items)) {
-            $logger->log('info', "loaded_cart_name: " . $loaded_cart_name, array('source' => 'test_loggggs'));
-            $unsaved_items_exist = true;
-        } 
-
-        if ($loaded_cart_name) {
-            $logger->log('info', "loaded_cart_name: " . $loaded_cart_name, array('source' => 'test_logs'));
-            // Check if there are items in the cart that are not part of the loaded saved cart
-            $unsaved_items_exist = false;
-        }
-
-        if ($unsaved_items_exist) {
-            wp_send_json_success(['unsaved_items' => true]);
-        } else {
-            wp_send_json_success(['unsaved_items' => false]);
-        }
-    }
-
-
     function mc_pre_toggle_saved_carts()
     {
         if (!is_user_logged_in()) {
@@ -395,7 +354,7 @@ class HandlerOutboundMultipleCart
             foreach ($current_cart_items as $cart_item_key => $cart_item) {
                 $found = false;
                 foreach ($saved_cart_items as $saved_item_key => $saved_item) {
-                    if ($cart_item['product_id'] === $saved_item['product_id'] &&
+                    if ($cart_item['product_id'] === $saved_item['product_id'] && $cart_item['variation_id'] === $saved_item['variation_id'] &&
                         $cart_item['quantity'] === $saved_item['quantity']) {
                         $adjust_st = new WoocommerceSettingsCustomFields;
 
@@ -409,12 +368,12 @@ class HandlerOutboundMultipleCart
                                 if ($term) {
                                     $term_quantity = get_term_meta($term->term_id, 'quantity', true);
                                     $adjust_quantity = $cart_item['quantity'] * (int)$term_quantity;
-                                    $adjust_st->adjust_stock($cart_item['product_id'], $adjust_quantity);
+                                    //$adjust_st->adjust_stock($cart_item['product_id'], $adjust_quantity);
                                 }
                             }
                         } else {
                             // Adjust stock for non-variation products
-                            $adjust_st->adjust_stock($cart_item['product_id'], $cart_item['quantity']);
+                            //$adjust_st->adjust_stock($cart_item['product_id'], $cart_item['quantity']);
                         }
                         $found = true;
                         break;
@@ -520,12 +479,13 @@ class HandlerOutboundMultipleCart
                 $variation_id = $cart_item['variation_id'];
                 $quantity = $cart_item['quantity'];
                 $variation = $cart_item['variation'];
+                $reservation_expiration_time =  $cart_item['reservation_expiration_time'];
 
                 // Check if item already exists in the saved cart
                 $exists = false;
                 foreach ($multi_carts[$cart_name] as &$saved_item) {
                     if ($saved_item['product_id'] == $product_id && $saved_item['variation_id'] == $variation_id) {
-                        $saved_item['quantity'] += $quantity;
+                        $saved_item['quantity'] = $quantity;
                         $exists = true;
                         break;
                     }
@@ -536,6 +496,7 @@ class HandlerOutboundMultipleCart
                         'quantity' => $quantity,
                         'variation_id' => $variation_id,
                         'variation' => $variation,
+                        'reservation_expiration_time'=> $reservation_expiration_time,
                     ];
                 }
             }
@@ -552,44 +513,52 @@ class HandlerOutboundMultipleCart
         if (!is_user_logged_in()) {
             wp_send_json_error(['message' => 'You must be logged in to delete a saved cart.']);
         }
-
+    
         if (empty($_POST['cart_name'])) {
             wp_send_json_error(['message' => 'Cart name is required.']);
         }
-
-        $cart_name = sanitize_text_field($_POST['cart_name']);
+    
+        $cart_name_to_delete = sanitize_text_field($_POST['cart_name']);
         $user_id = get_current_user_id();
-
+    
         $multi_carts = get_user_meta($user_id, 'mc_multi_carts', true) ?: [];
         $loaded_cart_name = WC()->session->get('mc_current_cart_name');
-
-        if (isset($multi_carts[$cart_name])) {
-            foreach ($multi_carts as $cart_name => $cart_items) {
-                foreach ($cart_items as $cart_item_key => $cart_item_data) {
-                    // Restore stock for expired item
-                    if (isset($cart_item_data['variation_id']) && isset($cart_item_data['variation'])) {
-                        // If the product is a variation
-                        restore_stock_on_remove($cart_item_key, (object) ['removed_cart_contents' => [$cart_item_key => $cart_item_data]]);
-                    }
+    
+        if (isset($multi_carts[$cart_name_to_delete])) {
+            $cart_items_to_delete = $multi_carts[$cart_name_to_delete];
+    
+            // Restore stock for items in the specific cart being deleted
+            foreach ($cart_items_to_delete as $cart_item_key => $cart_item_data) {
+                // Restore stock for expired item
+                if (isset($cart_item_data['variation_id']) && isset($cart_item_data['variation'])) {
+                    restore_stock_on_remove($cart_item_key, (object) ['removed_cart_contents' => [$cart_item_key => $cart_item_data]]);
+                } else {
+                    // Handle simple products
+                    restore_stock_on_remove($cart_item_key, (object) ['removed_cart_contents' => [$cart_item_key => $cart_item_data]]);
                 }
             }
+    
             // Remove the saved cart
-            unset($multi_carts[$cart_name]);
+            unset($multi_carts[$cart_name_to_delete]);
+    
             // Update the saved carts in user meta
             update_user_meta($user_id, 'mc_multi_carts', $multi_carts);
+    
             // Check if the deleted cart is the currently loaded cart
-            if ($cart_name === $loaded_cart_name) {
+            if ($cart_name_to_delete === $loaded_cart_name) {
                 WC()->session->__unset('mc_current_cart_name');
                 WC()->cart->empty_cart(); // Empty the cart as it was the loaded cart
             }
+    
             // Force session save to ensure changes take effect
             WC()->session->set('mc_current_cart_name', null);
+    
             wp_send_json_success(['message' => 'Saved cart deleted successfully.']);
         } else {
             wp_send_json_error(['message' => 'Saved cart not found.']);
         }
     }
-
+    
     /**
      * AJAX handler to Delete the saved cart after the order is placed
      */

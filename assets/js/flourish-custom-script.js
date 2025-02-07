@@ -1,5 +1,22 @@
 jQuery(document).ready(function ($) {
 
+    var atc_button = $("button.single_add_to_cart_button");
+    // Check if button exists before binding events
+    if (atc_button.length) {
+        //prevent multiple clicks on add-to-cart
+        $("form.cart").submit(function() {
+            //disable subsequent submits
+            $(this).submit(function() {
+                return false;
+            });
+            //show button as disabled
+            if (!atc_button.hasClass('disabled')) {
+                atc_button.addClass('disabled').text("Please wait...");
+            }
+            return true;
+        });
+    }
+
     // Check if there's a toast message in sessionStorage
     const message = sessionStorage.getItem('toastMessage');
     if (message) {
@@ -41,13 +58,17 @@ jQuery(document).ready(function ($) {
     // Handle Save Cart submission
     $(document).off('click', '#mc-save-cart-submit').on('click', '#mc-save-cart-submit', function (e) {
         e.preventDefault();
-
+        const button = $(this);
         const cartName = $('#mc-cart-name').val().trim();
-        
+        const loadingText = '<span class="frh-loader"></span> Saving...';
+
         if (!cartName) {
             showToast('Please enter a cart name.', 'warning');
             return;
         }
+
+         // Disable button and show loading text
+        button.prop('disabled', true).addClass('mc-btn-loading').html(loadingText);
         
         // AJAX request to save the cart
         $.post(mc_ajax.ajax_url, {
@@ -56,13 +77,16 @@ jQuery(document).ready(function ($) {
         }).done(function (response) {
             // Store the message in sessionStorage
             sessionStorage.setItem('toastMessage', response.data.message);
-            location.reload();
+           
             if (response.success) {                
                 location.reload(); // Reload the page to show updated saved carts
             }
         }).fail(function () {
             console.log(response.data.message);
             showToast('An error occurred while saving the cart.', 'error');
+        }).always(function () {
+            // Restore button after AJAX completes
+            button.prop('disabled', false).removeClass('mc-btn-loading').text('Save');
         });
     });
 
@@ -70,29 +94,7 @@ jQuery(document).ready(function ($) {
     $(document).off('click', '.mc-load-cart-btn').on('click', '.mc-load-cart-btn', function (e) {
         e.preventDefault();
         const cartName = $(this).data('cart-name');
-
-        // Check if unsaved items are present
-        $.post(stockAvailability.ajax_url, { action: 'mc_check_unsaved_items' }, function (response) {
-            if (response.success && response.data.unsaved_items) {
-                // Show confirmation alert if unsaved items exist
-                if (confirm("Are you sure you want to remove unsaved items in the cart to proceed with the loaded cart items? Click 'Yes' to remove unsaved items to load saved cart items.")) {
-                    // Proceed with loading the cart and remove unsaved items
-                    $.post(stockAvailability.ajax_url, {
-                        action: 'mc_load_saved_cart',
-                        cart_name: cartName,
-                    }).done(function (response) {
-                        if (response.success) {
-                            window.location.href = response.data.redirect_url;
-                        } else {
-                            showToast(response.data.message, 'error');
-                        }
-                    }).fail(function () {
-                        showToast('An error occurred while loading the cart.', 'error');
-                    });
-                } else {
-                    console.log("User canceled loading the saved cart.");
-                }
-            } else {
+ 
                 $.post(stockAvailability.ajax_url, {
                     action: 'mc_load_saved_cart',
                     cart_name: cartName,
@@ -105,135 +107,118 @@ jQuery(document).ready(function ($) {
                 }).fail(function () {
                     showToast('An error occurred while loading the cart.', 'error');
                 });
-            }
-        });
+           
+       
     });
-        
-    // Handle hide/show view saved cart list script with AJAX action
 
     // Handle hide/show view saved cart list script with AJAX action
-$('#mc-view-saved-carts-btn').off('click').on('click', function () {
-    const savedCartsList = $('#mc-saved-carts-list');
-
-    // Only trigger when the saved carts list is currently hidden
-    if (savedCartsList.hasClass('mc-hidden')) {
-        // AJAX action to check for unsaved items
-        $.post(stockAvailability.ajax_url, { action: 'mc_pre_toggle_saved_carts' }, function (response) {
-            if (response.success) {
-                if (response.data.unsaved_items) {
-                    console.log(response.data);
-
-                    // Show confirmation alert if unsaved items exist
-                    if (confirm("Unsaved items exist in your cart. Are you sure you want to proceed? Clicking 'Yes' will show your saved carts and clear the current cart.")) {
-                        // Clear the cart via AJAX
+    $('#mc-view-saved-carts-btn').off('click').on('click', function () {
+        const savedCartsList = $('#mc-saved-carts-list');
+        const button = $(this);
+        const loadingText = "<span class='frh-loader'></span> Just a moment...we're fetching your saved carts!";
+    
+        if (savedCartsList.is(':hidden')) {
+            
+            button.prop('disabled', true).addClass('mc-btn-loading').html(loadingText);
+            
+            $.post(stockAvailability.ajax_url, { action: 'mc_pre_toggle_saved_carts' }, function (response) {
+                if (response.success) {
+                    button.prop('disabled', false).removeClass('mc-btn-loading').text('Click to hide your Saved Carts'); // Restore button text
+            
+                    if (response.data.unsaved_items) {
+                        if (confirm("Extra items (including variations) exist in your cart that are not in your saved cart. Click 'OK' to remove them or 'Cancel' to update your cart manually.")) {
+                            $.post(stockAvailability.ajax_url, { action: 'mc_clear_current_cart', confirmed: 'yes' }, function (clearResponse) {
+                                if (clearResponse.success) {
+                                    savedCartsList.stop(true, true).slideDown(300);
+                                    $('#mc-view-saved-carts-btn').text('Click to hide your Saved Carts');
+                                    $('.woocommerce-cart-form, .cart_totals, .woocommerce-message, .woocommerce-error, .woocommerce-info').remove();
+                                    refresh_mini_cart();
+                                  
+                                    // location.reload();
+                                } else {
+                                    alert(clearResponse.data.message);
+                                }
+                            }).fail(function () {
+                                alert("An error occurred while clearing the cart.");
+                            });
+                        } else {
+                            alert("Cancelled. You can either save the cart items or update the items in your existing cart.");
+                        }
+                    } else {
+                        savedCartsList.stop(true, true).slideDown(300);
+    
                         $.post(stockAvailability.ajax_url, { action: 'mc_clear_current_cart' }, function (clearResponse) {
                             if (clearResponse.success) {
-                                savedCartsList.removeClass('mc-hidden');
-                                $('#mc-view-saved-carts-btn').text('Click to hide your Saved Carts');
-                                // Remove the WooCommerce cart table
-                                $('.woocommerce-cart-form').remove();
-                                // Remove the WooCommerce cart totals
-                                $('.cart_totals').remove();
-                                // Remove WooCommerce notices
-                                $('.woocommerce-message, .woocommerce-error, .woocommerce-info').remove();
-                                
-                            } else {
-                                 
+                                savedCartsList.stop(true, true).slideDown(300);
+                                // button.prop('disabled', false).text('Click to hide your Saved Carts');
+                                $('.woocommerce-cart-form, .cart_totals, .woocommerce-message, .woocommerce-error, .woocommerce-info').remove();
+                                location.reload();
                             }
                         }).fail(function () {
                             alert("An error occurred while clearing the cart.");
                         });
-                    } else {
-                        console.log("User canceled showing saved carts.");
                     }
                 } else {
-                    // No unsaved items; show the saved carts list directly
-                    savedCartsList.removeClass('mc-hidden');
-                    // Clear the cart via AJAX
-                    $.post(stockAvailability.ajax_url, { action: 'mc_clear_current_cart' }, function (clearResponse) {
-                        if (clearResponse.success) {
-                            savedCartsList.removeClass('mc-hidden'); 
-                            $('#mc-view-saved-carts-btn').text('Click to hide your Saved Carts');
-                            // Remove the WooCommerce cart table
-                            $('.woocommerce-cart-form').remove();
-                            // Remove the WooCommerce cart totals
-                            $('.cart_totals').remove();
-                            // Remove WooCommerce notices
-                            $('.woocommerce-message, .woocommerce-error, .woocommerce-info').remove();
-                            //alert("Current cart cleared successfully.");
-                        } else {
-                            //alert("Failed to clear the current cart. Please try again.");
-                        }
-                    }).fail(function () {
-                        alert("An error occurred while clearing the cart.");
-                    });
-                   
-                }
-            } else {
-                console.log(response.data);
-                alert("Unable to toggle saved carts at the moment. Please try again.");
-            }
-        }).fail(function () {
-            alert("An error occurred while toggling the saved carts view.");
-        });
-    } else {
-        // If the list is already visible, simply toggle it without any AJAX call
-        savedCartsList.addClass('mc-hidden');
-        $('#mc-view-saved-carts-btn').text('Click to view your Saved Carts');
-    }
-});
-
-    /*
-    $('#mc-view-saved-carts-btn').off('click').on('click', function () {
-        const savedCartsList = $('#mc-saved-carts-list');
-
-        // Only trigger when the saved carts list is currently hidden
-        if (savedCartsList.hasClass('mc-hidden')) {
-            // AJAX action to check for unsaved items
-            $.post(stockAvailability.ajax_url, { action: 'mc_pre_toggle_saved_carts' }, function (response) {
-                if (response.success) {
-                    if (response.data.unsaved_items) {
-                        console.log(response.data);
-
-                        // Show confirmation alert if unsaved items exist
-                        if (confirm("Unsaved items exist in your cart. Are you sure you want to proceed? Clicking 'Yes' will show your saved carts.")) {
-                            savedCartsList.removeClass('mc-hidden');
-                            $('#mc-view-saved-carts-btn').text('Click to hide your Saved Carts');
-                        } else {
-                            console.log("User canceled showing saved carts.");
-                        }
-                    } else {
-                        // No unsaved items; show the saved carts list directly
-                        savedCartsList.removeClass('mc-hidden');
-                        $('#mc-view-saved-carts-btn').text('Click to hide your Saved Carts');
-                    }
-                } else {
-                    console.log(response.data);
                     alert("Unable to toggle saved carts at the moment. Please try again.");
                 }
             }).fail(function () {
+                button.text('Click to view your Saved Carts');
                 alert("An error occurred while toggling the saved carts view.");
             });
+    
         } else {
-            // If the list is already visible, simply toggle it without any AJAX call
-            savedCartsList.addClass('mc-hidden');
-            $('#mc-view-saved-carts-btn').text('Click to view your Saved Carts');
+            savedCartsList.stop(true, true).slideUp(300);
+            button.text('Click to view your Saved Carts');
         }
-    });*/
+    });
 
-        // Show the popup
-        $(document).on('click', '#mc-save-cart-btn', function () {
-            console.log("Open Save Cart Modal");
-            $('#mc-save-cart-modal').fadeIn();
-            $('#mc-modal-overlay').fadeIn();
+    // To refresh of the mini cart automatically
+    function refresh_mini_cart() {
+        $.ajax({
+            url: wc_cart_fragments_params.wc_ajax_url.toString().replace('%%endpoint%%', 'get_refreshed_fragments'),
+            type: 'POST',
+            success: function (response) {
+                if (response && response.fragments) {
+                    $.each(response.fragments, function (key, value) {
+                        $(key).replaceWith(value);
+                    });
+                }
+            }
         });
+    }
+   
+    // Prevent multiple clicks on "Add to Cart" button
+    $(document).on("click", ".add_to_cart_button", function (e) {
+        var button = $(this);
 
-        // Close the popup
-        $(document).on('click', '#mc-close-cart-modal, #mc-modal-overlay', function () {
-            $('#mc-save-cart-modal').fadeOut();
-            $('#mc-modal-overlay').fadeOut();
-        });
-        jQuery(document).ready(function($) {
+        // If button is already disabled, prevent further action
+        if (button.hasClass("disabled")) {
+            e.preventDefault();
+            return false;
+        }
+
+        // Disable button and change text
+        button.addClass("disabled").text("Adding...");
+
+        // Re-enable button after 3 seconds (optional)
+        setTimeout(function () {
+            button.removeClass("disabled").text("Add to Cart");
+        }, 3000); // Adjust timeout as needed
+    });
+
+    // Show the popup
+    $(document).on('click', '#mc-save-cart-btn', function () {
+        console.log("Open Save Cart Modal");
+        $('#mc-save-cart-modal').fadeIn();
+        $('#mc-modal-overlay').fadeIn();
+    });
+
+    // Close the popup
+    $(document).on('click', '#mc-close-cart-modal, #mc-modal-overlay', function () {
+        $('#mc-save-cart-modal').fadeOut();
+        $('#mc-modal-overlay').fadeOut();
+    });
+    jQuery(document).ready(function($) {
 
     //------------------------- Save to cart js::Start --------------------
     // Ensure the update cart button is enabled on page load
@@ -281,39 +266,7 @@ $('#mc-view-saved-carts-btn').off('click').on('click', function () {
         sessionStorage.removeItem('toastMessage');
     }
 });
-    
-    // $('#mc-view-saved-carts-btn').off('click').on('click', function () {
-    //     const savedCartsList = $('#mc-saved-carts-list');
-    //     if (savedCartsList.hasClass('mc-hidden')) {
-    //         console.log('Removing hidden class');
-    //         savedCartsList.removeClass('mc-hidden');
-    //         $(this).text('Click to hide your Saved Carts');
-    //     } else {
-    //         console.log('Adding hidden class');
-    //         savedCartsList.addClass('mc-hidden');
-    //         $(this).text('Click to view your Saved Carts');
-    //     }
-    // });
-
-    // $('#mc-update-saved-cart').on('click', function() {
-    //     var cartName = $(this).data('cart-name');        
-    //     // AJAX request to update the cart
-    //     $.post(mc_ajax.ajax_url, {
-    //         action: 'mc_update_saved_cart_ajax',
-    //         cart_name: cartName,
-    //     }).done(function (response) {
-    //         // Store the message in sessionStorage
-    //         sessionStorage.setItem('toastMessage', response.data.message);
-    //         location.reload();
-    //         if (response.success) {
-    //             location.reload(); // Reload the page to show updated saved carts
-    //         }
-    //     }).fail(function () {
-    //         console.log(response.data.message);
-    //         showToast('An error occurred while saving the cart.', 'error');
-    //     });
-    // });
-
+   
     // Handle Delete Cart button
     $(document).off('click', '.mc-delete-cart-btn').on('click', '.mc-delete-cart-btn', function (e) {
         e.preventDefault();

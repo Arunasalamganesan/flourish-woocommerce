@@ -26,11 +26,12 @@ class HandlerOrdersSyncNow
         add_action('wp_trash_post', [$this, 'custom_action_on_trash_order_from_edit_page'], 10, 1);
         // Hook into the WooCommerce order save action
         add_action('woocommerce_process_shop_order_meta', [$this, 'handle_order_cancel_update'], 10, 3);
-        // Ajax Handler for stock availability with case size quantity
-        //add_action('wp_ajax_check_stock_availability', [$this, 'check_stock_availability']);
-        //add_action('wp_ajax_nopriv_check_stock_availability', [$this, 'check_stock_availability']);
+        add_filter('handle_bulk_actions-edit-shop_order', [$this, 'handle_custom_bulk_status_action'], 10, 3);
+        //add_action('woocommerce_order_edit_status', [$this, 'handle_custom_bulk_status_action'], 10, 2);
+        //add_action('woocommerce_order_edit_status',  [$this, 'handle_bulk_action_wc_orders'], 10, 3);
 
     }
+    
     /**
      * Adds a custom "Sync Now" action to the available actions list.
      * @param array $actions An array of existing actions.
@@ -153,17 +154,16 @@ class HandlerOrdersSyncNow
 
     public function custom_action_on_trash_order_from_edit_page($post_id)
     {
-
         $order_type = isset($this->existing_settings['flourish_order_type']) ? $this->existing_settings['flourish_order_type'] : false;
 
         if ($order_type !== 'retail') {
             // Check if the post being trashed is a WooCommerce order
             if ('shop_order' !== get_post_type($post_id)) {
-                return;
+                //return;
             }
 
             // Ensure the action is coming from the WooCommerce admin order edit page
-            if (is_admin() && isset($_GET['post']) && $_GET['post'] == $post_id && isset($_GET['action']) && $_GET['action'] === 'trash') {
+            if ($_GET['action'] === 'trash') {
                 // Retrieve the WooCommerce order
                 $wc_order = wc_get_order($post_id);
                 $this->sync_cancel_update($wc_order, $post_id);
@@ -241,7 +241,96 @@ class HandlerOrdersSyncNow
         }
         return true;
     }
+    public function handle_custom_bulk_status_action($redirect_to, $action, $post_ids) {
+       
+        error_log('Bulk sync triggered for orders: ' . print_r($post_ids, true));
 
+        foreach ($post_ids as $order_id) {
+            $this->handle_order_cancel_update_bulk($order_id,$action);
+        }
+
+        return add_query_arg('bulk_sync_to_flourish_done', count($post_ids), $redirect_to);
+    }
+
+   
+    public function handle_order_cancel_update_bulk($post_id,$status)
+    {
+        // Ensure this is a WooCommerce order
+        if ('shop_order' !== get_post_type($post_id)) {
+            //return;
+        }
+
+        // Get the updated order
+        $wc_order = wc_get_order($post_id);
+
+        if (!$wc_order) {
+            error_log('Order not found for post ID ' . $post_id);
+            return;
+        }
+
+        // Check if the order status is being updated to "Cancelled"
+        $selected_status = $status;
+
+        // Retrieve any additional data or settings needed
+        $order_type = isset($this->existing_settings['flourish_order_type']) ? $this->existing_settings['flourish_order_type'] : false;
+
+        if ($order_type !== 'retail') {
+            $flourish_order_id = $wc_order->get_meta('flourish_order_id');
+
+            if (!empty($flourish_order_id)) {
+                $flourish_api = $this->initializeFlourishAPI();
+                $order_data = $flourish_api->get_order_by_id($flourish_order_id, "outbound-orders");
+
+                $order_status = isset($order_data['order_status']) ? $order_data['order_status'] : null;
+                if ($order_status === "Allocated") {
+                    // Your desired logic here
+                    // For example: Disable items or update order meta
+                    $wc_order->add_order_note("The order is allocated in Flourish.");
+                    $wc_order->save();
+                }
+            }
+            if ($selected_status === 'mark_cancelled') {
+
+                $flourish_order_id = $wc_order->get_meta('flourish_order_id');
+
+                if (empty($flourish_order_id)) {
+                    // Create outbound order in Flourish.
+                    if ($selected_status === 'mark_cancelled') {
+                        $order = wc_get_order($post_id);
+                        //if ($order instanceof WC_Order) {
+
+                        // Check if stock has already been adjusted
+                        if (!$order->get_meta('_stock_adjusted')) {
+                            $this->adjust_variation_stock($order, 'increase');
+                            // Mark stock as adjusted
+                            $order->update_meta_data('_stock_adjusted', true);
+                            $order->save();
+                        } else {
+                            error_log("Stock already adjusted cancelled: {$post_id}");
+                        }
+                        
+                    }
+                }
+                else
+                {
+                    // Check if the post being trashed is a WooCommerce order
+                    if ('shop_order' !== get_post_type($post_id)) {
+                        //return;
+                    }
+                    // Retrieve the WooCommerce order
+                    $wc_order = wc_get_order($post_id);
+                    $this->sync_cancel_update($wc_order, $post_id);
+                }
+            }
+            if ($selected_status === 'mark_processing') {
+                $sync_outboundorder = $this->handle_order_outbound($post_id);
+            }
+            if ($selected_status === 'mark_completed') {
+                $sync_outboundorder =  $this->sync_products_with_flourish($post_id, "shipped");
+            }
+            
+        }
+    }
     public function handle_order_cancel_update($post_id)
     {
         // Ensure this is a WooCommerce order
@@ -282,12 +371,36 @@ class HandlerOrdersSyncNow
             }
             if ($selected_status === 'wc-cancelled') {
                 // Check if the post being trashed is a WooCommerce order
-                if ('shop_order' !== get_post_type($post_id)) {
-                    //return;
+                $flourish_order_id = $wc_order->get_meta('flourish_order_id');
+
+                if (empty($flourish_order_id)) {
+                    // Create outbound order in Flourish.
+                    if ($selected_status === 'wc-cancelled') {
+                        $order = wc_get_order($post_id);
+                        //if ($order instanceof WC_Order) {
+
+                        // Check if stock has already been adjusted
+                        if (!$order->get_meta('_stock_adjusted')) {
+                            $this->adjust_variation_stock($order, 'increase');
+                            // Mark stock as adjusted
+                            $order->update_meta_data('_stock_adjusted', true);
+                            $order->save();
+                        } else {
+                            error_log("Stock already adjusted cancelled: {$post_id}");
+                        }
+                        //}
+                        //$sync_outboundorder =  $this->reduce_variation_stock($post_id); 
+                    }
                 }
-                // Retrieve the WooCommerce order
-                $wc_order = wc_get_order($post_id);
-                $this->sync_cancel_update($wc_order, $post_id);
+                else
+                {
+                    if ('shop_order' !== get_post_type($post_id)) {
+                        //return;
+                    }
+                    // Retrieve the WooCommerce order
+                    $wc_order = wc_get_order($post_id);
+                    $this->sync_cancel_update($wc_order, $post_id);
+                }
             }
             if ($selected_status === 'wc-processing') {
                 $sync_outboundorder = $this->handle_order_outbound($post_id);
@@ -295,27 +408,7 @@ class HandlerOrdersSyncNow
             if ($selected_status === 'wc-completed') {
                 $sync_outboundorder =  $this->sync_products_with_flourish($post_id, "shipped");
             }
-            $flourish_order_id = $wc_order->get_meta('flourish_order_id');
-
-            if (empty($flourish_order_id)) {
-                // Create outbound order in Flourish.
-                if ($selected_status === 'wc-cancelled') {
-                    $order = wc_get_order($post_id);
-                    //if ($order instanceof WC_Order) {
-
-                    // Check if stock has already been adjusted
-                    if (!$order->get_meta('_stock_adjusted')) {
-                        $this->adjust_variation_stock($order, 'increase');
-                        // Mark stock as adjusted
-                        $order->update_meta_data('_stock_adjusted', true);
-                        $order->save();
-                    } else {
-                        error_log("Stock already adjusted cancelled: {$post_id}");
-                    }
-                    //}
-                    //$sync_outboundorder =  $this->reduce_variation_stock($post_id); 
-                }
-            }
+            
         }
     }
     /**
@@ -478,6 +571,7 @@ class HandlerOrdersSyncNow
         $flourish_order_id = $wc_order->get_meta('flourish_order_id');
 
         if (empty($flourish_order_id)) {
+            $this->adjust_variation_stock($wc_order, 'increase');
             error_log('Flourish Order ID not found for WooCommerce Order ID ' . $wc_order->get_id());
             return;
         }

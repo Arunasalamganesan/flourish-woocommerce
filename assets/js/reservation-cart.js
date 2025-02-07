@@ -72,7 +72,7 @@ jQuery(document).on('click', '.remove', function(e) {
         url: stockAvailability.ajax_url,
         type: 'POST',
         data: {
-            action: 'restore_stock_on_remove',
+            action: 'restore_stock_on_remove_cart',
             product_id: productId,
             cart_item_key: cartItemKey,
             nonce: nonce

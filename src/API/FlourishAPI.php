@@ -1,7 +1,7 @@
 <?php
 
 namespace FlourishWooCommercePlugin\API;
-
+use FlourishWooCommercePlugin\Importer\FlourishItems;
 use FlourishWooCommercePlugin\Helpers\HttpRequestHelper;
 use WP_REST_Request; // Import the global WP_REST_Request class.
 use WP_REST_Response;
@@ -36,62 +36,114 @@ class FlourishAPI
      * @param array  $brands        An array of brand names or IDs to filter by. Defaults to an empty array.
      * @return array An array of fetched products based on the given filters.
      */
-    public function fetch_products($filter_brands = false, $brands = [])
-    {
-        $products = [];
+
+    public function fetch_products($filter_brands = false, $brands = []) {
         $offset = 0;
-        $limit = self::API_LIMIT; 
-        $has_more_products = true;
-
-        while ($has_more_products) {
+        $limit = self::API_LIMIT;
+        $total_imported_count = 0;
+     
+        while (true) {
             $api_url = $this->url . "/external/api/v1/items?active=true&ecommerce_active=true&offset={$offset}&limit={$limit}";
+     
+            if ($filter_brands && !empty($brands)) {
+                $brand_query = array_map('urlencode', $brands);
+                $api_url .= "&" . implode("&", array_map(fn($brand) => "brand_name={$brand}", $brand_query));
+            }
+     
+            $headers = ['Authorization: Basic ' . $this->auth_header];
+     
+            try {
+                $response_http = HttpRequestHelper::make_request($api_url, 'GET', $headers);
+                $response_data = HttpRequestHelper::validate_response($response_http);
+            } catch (\Exception $e) {
+                error_log("Error fetching products (API call): " . $e->getMessage());
+                sleep(60); // Wait longer after a major API error
+                continue; // Retry the API call
+            }
+     
+            if (!isset($response_data['data']) || !is_array($response_data['data'])) {
+                error_log("API returned empty data.");
+                break; // Exit the loop if no data
+            }
+     
+            $flourish_products = $response_data['data'];
+            $batch = [];
+     
+            // Optimized Inventory Fetching: Batch by Item IDs
+            $item_ids = array_column($flourish_products, 'id');  // Get all item IDs
+            $inventory_map = $this->fetch_bulk_inventory($item_ids); // Fetch all inventory at once
+     
+            foreach ($flourish_products as $flourish_product) {
 
-            $headers = [
-                'Authorization: Basic ' . $this->auth_header,
-            ];
+                $inventory_quantity = $inventory_map[$flourish_product['id']] ?? 0;  // Direct lookup
+                $flourish_product['inventory_quantity'] = $inventory_quantity;
+                $batch[] = $flourish_product;
+     
+                if (count($batch) === 50) {
+                    $imported_count = $this->process_batch($batch);
+                    $total_imported_count += $imported_count;
+                    $batch = [];
+                }
+            }
+     
+            if (!empty($batch)) {
+                $imported_count = $this->process_batch($batch);
+                $total_imported_count += $imported_count;
+            }
+     
+            if (count($flourish_products) < $limit) {
+                break;
+            }
+     
+            $offset += $limit;
+           // sleep(2); // Delay between product API calls
+        }
+     
+        return $total_imported_count;
+    }
+    public function fetch_bulk_inventory($item_ids)
+    {
+        if (empty($item_ids)) {
+            return [];
+        }
+        $query_params = implode('&', array_map(fn($id) => "item_id={$id}", $item_ids));
+        $api_url = $this->url . "/external/api/v1/inventory/summary?" . $query_params;
 
-            try
-            {
+        $headers = [
+            'Authorization: Basic ' . $this->auth_header,
+            'FacilityID: ' . $this->facility_id,
+        ];
+
+        try {
             $response_http = HttpRequestHelper::make_request($api_url, 'GET', $headers);
             $response_data = HttpRequestHelper::validate_response($response_http);
-            } catch (\Exception $e) {
-                throw new \Exception("Error fetching products: " . $e->getMessage());
-            }
-
-            if (isset($response_data['data']) && is_array($response_data['data'])) {
-                $flourish_products = $response_data['data'];
-                // Grab the inventory for all of them
-                foreach ($flourish_products as $key => $flourish_product) {
-                    // We need to check if this product belongs to one of the active brands
-                    if ($filter_brands && !in_array($flourish_product['brand'], $brands)) {
-                        unset($flourish_products[$key]);
-                        continue;
-                    }
-
-                    $item_id = $flourish_product['id'];
-                    $inventory_records = $this->fetch_inventory($item_id);
-                    $inventory_quantity = 0;
-                    foreach ($inventory_records as $inventory) {
-                        // There are item variations sometimes so we'll get more than one inventory record back
-                        // for a single item. We only want the one that matches the SKU.
-                        if ($inventory['sku'] === $flourish_product['sku']) {
-                            $inventory_quantity = $inventory['sellable_qty'];
-                            break;
-                        }
-                    }
-
-                    $flourish_products[$key]['inventory_quantity'] = $inventory_quantity;
-                }
-                $products = array_merge($products, $flourish_products);
-            }
-
-            $has_more_products = isset($response_data['meta']['next']) && !empty($response_data['meta']['next']);
-
-            $offset += $limit;
+        } catch (\Exception $e) {
+            throw new \Exception("Error fetching bulk inventory: " . $e->getMessage());
         }
 
-        return $products;
+        // Convert inventory array to [item_id => quantity]
+        $inventory_data = [];
+        return isset($response_data['data']) && is_array($response_data['data'])
+        ? array_column($response_data['data'], 'sellable_qty', 'item_id')
+        : [];
+
+        //return $inventory_data;
     }
+    private function process_batch($batch) {
+        try {
+            $flourish_items = new FlourishItems($batch);
+            $imported_count = $flourish_items->save_as_woocommerce_products($this->existing_settings['item_sync_options'] ?? []);
+            error_log("Batch imported count: " . $imported_count);
+    
+            unset($flourish_items);
+            gc_collect_cycles();
+            return $imported_count;
+        } catch (\Exception $e) {
+            error_log("Error importing batch: " . $e->getMessage());
+            return 0;
+        }
+    }
+
 
     public function fetch_facilities()
     {
@@ -146,6 +198,9 @@ class FlourishAPI
          $response_http = HttpRequestHelper::make_request($api_url, 'GET', $headers);
          $response_data = HttpRequestHelper::validate_response($response_http);
         } catch (\Exception $e) {
+            if (isset($response_http['http_code']) && $response_http['http_code'] == 400) {
+                return true; // Return true for 400 error
+            }
             throw new \Exception("Error fetching facility config: " . $e->getMessage());
         }
 

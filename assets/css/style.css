@@ -138,14 +138,23 @@ input[type="date"] {
     opacity: 0.5; /* Dim the button to look disabled */
     cursor: not-allowed; /* Change cursor to indicate disabled state */
 }
-.single_add_to_cart_button.disabled {
-    pointer-events: none;
-    background-color: #cccccc; /* Light gray */
-    color: #666666; /* Dark gray text */
-    opacity: 0.7;
-    cursor: not-allowed;
+ 
+
+#out-of-stock-container .woocommerce-error {
+    background-color: #f2dede;
+    border-color: #ebccd1;
+    color: #a94442;
+    padding: 10px;
+    border-radius: 4px;
+    margin-top: 15px;
 }
 
+.single_add_to_cart_button:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+    opacity: 0.6;
+    pointer-events: none;
+}
 
 
 

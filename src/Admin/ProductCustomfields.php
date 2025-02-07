@@ -11,50 +11,45 @@ class ProductCustomFields
  
     public function register_hooks()
     {
-        // Add the action hooks to display and save custom fields.
+        //Add the action hooks to display and save custom fields.
         add_action('woocommerce_product_options_general_product_data', [$this, 'add_custom_fields']);
-        // Add "Hold Stock" below stock field in the Inventory tab
+        //Add "Hold Stock" below stock field in the Inventory tab
         add_action('woocommerce_product_options_inventory_product_data', [$this, 'add_custom_fields_inventory']);       
         add_action('woocommerce_process_product_meta', [$this, 'save_custom_fields']);
-         // Enforce min/max quantities in the cart
-         add_filter('woocommerce_add_to_cart_validation', [$this, 'validate_min_max_order_quantity'], 10, 3);
-         // Enforce min/max quantities in the cart page
+        //Enforce min/max quantities in the cart
+        add_filter('woocommerce_add_to_cart_validation', [$this, 'validate_min_max_order_quantity'], 10, 3);
         add_action('woocommerce_check_cart_items', [$this, 'validate_cart_min_max_order_quantity']);
     }
 
     public function add_custom_fields_inventory()
-{
-    global $post;
-
-    // Retrieve the held stock value
-    $hold_stock = get_post_meta($post->ID, '_held_stock', true) ?: 0;
-
-    // Add the field in the Inventory tab
-    echo '<div class="options_group">';
-    woocommerce_wp_text_input([
-        'id' => '_held_stock',
-        'label' => __('Held Stock', 'woocommerce'),
-        'description' => __('Display units hold in stock for Cart Items.', 'woocommerce'),
-        'type' => 'number',
-        'value' => $hold_stock,
-        'desc_tip' => true,
-        'custom_attributes' => [
-            'readonly' => 'readonly', // This makes the field non-editable
-        ],
-    ]);
-    echo '</div>';
-}
+    {
+        global $post;
+        // Retrieve the held stock value
+        $hold_stock = get_post_meta($post->ID, '_held_stock', true) ?: 0;
+        // Add the field in the Inventory tab
+        echo '<div class="options_group">';
+        woocommerce_wp_text_input([
+            'id' => '_held_stock',
+            'label' => __('Held Stock', 'woocommerce'),
+            'description' => __('Display units hold in stock for Cart Items.', 'woocommerce'),
+            'type' => 'number',
+            'value' => $hold_stock,
+            'desc_tip' => true,
+            'custom_attributes' => [
+                'readonly' => 'readonly', // This makes the field non-editable
+            ],
+        ]);
+        echo '</div>';
+    }
 
     public function add_custom_fields()
     {
             global $post;
-           
             // Get the WC_Product object.
             $wc_product = wc_get_product($post->ID);
             $product_id = $wc_product->get_id();
             // Retrieve the regular price.
             $regular_price = get_post_meta($product_id, '_price', true);
- 
             // Define the fields and their properties.
             $fields = [
                 'unit_weight' => [
@@ -155,8 +150,7 @@ class ProductCustomFields
            wc_add_notice(sprintf(__('You can only purchase a maximum of %s of this product.', 'your-text-domain'), $max_quantity), 'error');
            $passed = false;
        }
- 
-   return $passed;
+       return $passed;
    }
  
    // Function to validate quantity in the Cart page

@@ -12,7 +12,7 @@ use FlourishWooCommercePlugin\API\FlourishWebhook;
 use FlourishWooCommercePlugin\Admin\ProductCustomfields;
 use FlourishWooCommercePlugin\Admin\WoocommerceSettingsCustomFields;
 use FlourishWooCommercePlugin\Handlers\HandlerOrdersCancel;
-use FlourishWooCommercePlugin\Admin\WoocommerceRetailPage;
+use FlourishWooCommercePlugin\Handlers\HandlerOutboundUpdateCart;
 use FlourishWooCommercePlugin\Handlers\HandlerOutboundMultipleCart;
 
 class ServiceProvider
@@ -50,13 +50,13 @@ class ServiceProvider
             
             $dob = new \FlourishWooCommercePlugin\CustomFields\DateOfBirth();
             $dob->register_hooks();
-            (new WoocommerceRetailPage())->register_hooks();
             (new HandlerOrdersRetail($this->settings))->register_hooks();
         } else {
             (new License($this->settings))->register_hooks();
             (new WoocommerceSettingsCustomFields())->register_hooks(); 
-            (new HandlerOrdersOutbound($this->settings))->register_hooks();
-            (new HandlerOutboundMultipleCart($this->settings))->register_hooks();
+            (new HandlerOrdersOutbound($this->settings))->register_hooks();            
+            (new HandlerOutboundUpdateCart())->register_hooks(); 
+            (new HandlerOutboundMultipleCart())->register_hooks();
         }
     }
     

@@ -132,7 +132,10 @@ class FlourishWebhook
         // Define a context for the log (optional, useful for filtering logs)
         $context = ['source' => 'flourish-webhook'];
         
-        $this->handle_item($payload['data']);
+        if($payload['resource_type'] == "item" )
+		{
+		   $this->handle_item($payload['data']);	
+		}
         // Write to WooCommerce logger
         if ($status === 'success') {
             $logger->info($log_message, $context);

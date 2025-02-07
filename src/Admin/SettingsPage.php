@@ -676,27 +676,9 @@ class SettingsPage
         return new FlourishAPI($username, $api_key, $url, $facility_id);
     }
     
-    public function import_products()
-    {
-        // Fetch the API object
+    public function import_products() {
         $flourish_api = $this->get_flourish_api();
-
-        // Fetch products and import them into WooCommerce
-        $all_products = $flourish_api->fetch_products($this->existing_settings['filter_brands'] ?? false, $this->existing_settings['brands'] ?? []);
-
-        // Split the products into batches of 10
-        $batches = array_chunk($all_products, 10);
-
-        $total_imported_count = 0;
-        foreach ($batches as $batch) {
-            // Create a new instance of FlourishItems for each batch
-            $flourish_items = new FlourishItems($batch);
-            $imported_count = $flourish_items->save_as_woocommerce_products($this->existing_settings['item_sync_options'] ?? []);
-            $total_imported_count += $imported_count;
-            // Optional: Add a small delay between batches to reduce server load
-            usleep(500000); // 0.5 seconds
-        }
-        return $total_imported_count;
+        return $flourish_api->fetch_products($this->existing_settings['filter_brands'] ?? false, $this->existing_settings['brands'] ?? []); // Call fetch_products, which now handles processing
     }
 
     public function get_facilities()
@@ -730,9 +712,15 @@ class SettingsPage
     {
         // Fetch the API object
         $flourish_api = $this->get_flourish_api();
-
-        // Return the facility config
-       return $flourish_api->fetch_facility_config($facility_id);
+        if(!empty($facility_id))
+        {
+            // Return the facility config
+            return $flourish_api->fetch_facility_config($facility_id);
+        }
+        else
+        {
+            return true;
+        }
     }
     
     /**
