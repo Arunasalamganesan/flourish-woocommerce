@@ -157,12 +157,12 @@ class HandlerOrdersOutbound
             $product = wc_get_product($variation_id ? $variation_id : $item->get_product_id());
             $line_item_id = $item->get_id(); // Get the line item ID
             $case_quantity = 0; // Default case quantity
-
+            $variable_price = 0;
             // Check if the product is a variation
             if ($variation_id) {
                 // Get variation attributes
                 $attributes = $product->get_attributes();
-
+               
                 foreach ($attributes as $attribute_slug => $attribute_value) {
                     // Ensure attribute slug starts with "pa_"
                     //$taxonomy = 'pa_' . str_replace('base-uom-', '', $attribute_slug);
@@ -177,7 +177,7 @@ class HandlerOrdersOutbound
                         }
                     
                 }
-                
+                $variable_price = ((float)$item->get_total() / $item->get_quantity()) / $case_quantity; // Price per single item
             }
 
             if ($product && $product->get_sku()) {
@@ -185,8 +185,11 @@ class HandlerOrdersOutbound
                 $weight = (float)$case_quantity; 
                 $quantity = $item->get_quantity();
                 $product_id = $item->get_product_id();
-                $total_weight = $weight > 0 ? $weight * $quantity : $quantity;
-                $total_reserved_stock += $total_weight;
+                $total_qty = $weight > 0 ? $weight * $quantity : $quantity;
+                $total_reserved_stock += $total_qty;
+                $simple_price = (float)$item->get_total() / $item->get_quantity();
+                $unit_price = $variable_price > 0 ? $variable_price : $simple_price;
+
                 if($action == 'create')
                 {
                     $line_item_stock = (int) get_post_meta($line_item_id, '_reserved_stock', true); 
@@ -198,7 +201,8 @@ class HandlerOrdersOutbound
                 
                 $order_lines[] = (object)[
                     'sku' => $product->get_sku(),
-                    'order_qty' => $total_weight,
+                    'order_qty' => $total_qty,  
+                    'unit_price'=> $unit_price,  
                 ];
 
             }

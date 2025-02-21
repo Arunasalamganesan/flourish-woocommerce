@@ -164,9 +164,8 @@ class HandlerOrdersRetail
         foreach ($wc_order->get_items() as $item) {
             $variation_id = $item->get_variation_id();
             $product = wc_get_product($variation_id ? $variation_id : $item->get_product_id());
-            
             $case_quantity = 0; // Default case quantity
-
+            $variable_price = 0;
             // Check if the product is a variation
             if ($variation_id) {
                 // Get variation attributes
@@ -186,18 +185,20 @@ class HandlerOrdersRetail
                         }
                     
                 }
-                
+                $variable_price = ((float)$item->get_total() / $item->get_quantity()) / $case_quantity; // Price per single item
             }
 
             if ($product && $product->get_sku()) {
                 // Calculate total weight using case quantity
                 $weight = (float)$case_quantity; 
                 $quantity = $item->get_quantity();
-                $total_weight = $weight > 0 ? $weight * $quantity : $quantity;
-
+                $total_qty = $weight > 0 ? $weight * $quantity : $quantity;
+                $simple_price = (float)$item->get_total() / $item->get_quantity();
+                $unit_price = $variable_price > 0 ? $variable_price : $simple_price;
                 $order_lines[] = (object)[
                     'sku' => $product->get_sku(),
-                    'order_qty' => $total_weight,
+                    'order_qty' => $total_qty,
+                    'unit_price'=> $unit_price,
                 ];
             }
         }
