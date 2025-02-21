@@ -7,6 +7,7 @@ defined( 'ABSPATH' ) || exit;
 use FlourishWooCommercePlugin\API\FlourishAPI;
 use FlourishWooCommercePlugin\Importer\FlourishItems;
 
+
 class SettingsPage
 {
     public $plugin_basename;
@@ -15,11 +16,12 @@ class SettingsPage
     public function __construct($existing_settings, $plugin_basename)
     {
         $this->existing_settings = $existing_settings ? $existing_settings : [];
-        $this->plugin_basename = $plugin_basename;
+        $this->plugin_basename =  $plugin_basename;
     }
 
     public function register_hooks()
     {
+        add_filter('plugin_action_links_' . $this->plugin_basename, [$this, 'add_settings_link']);
         // Get the settings page to show up in the admin menu
         add_action('admin_menu', function() {
             $page_hook = add_options_page(
@@ -33,8 +35,6 @@ class SettingsPage
             add_action('load-' . $page_hook, [$this, 'register_settings']);
         });
 
-        add_filter('plugin_action_links_' . $this->plugin_basename, [$this, 'add_settings_link']);
-
         add_action('admin_init', function() {
             register_setting('flourish-woocommerce-plugin-settings-group', 'flourish_woocommerce_plugin_settings', [
                 'type' => 'array',
@@ -43,160 +43,125 @@ class SettingsPage
                 'show_in_rest' => false,
             ]);
         });
-
+        //calling custom css
+        add_action('admin_enqueue_scripts', [$this, 'flourish_woocommerce_plugin_enqueue_styles']);
         // Handling importing products button being pushed
         if (isset($_POST['action']) && $_POST['action'] === 'import_products') {
             add_action('admin_init', [$this, 'handle_import_products_form_submission']);
         }
+        // Unified add_action to handle Add/Edit operations for case sizes.
+        add_action('wp_ajax_add_edit_case_size',    [$this, 'handle_ajax_add_edit_case_size']);
+        // to handle Add/Edit operations for case sizes.
+        add_action('wp_ajax_delete_case_size', [$this, 'handle_ajax_delete_case_size']);
+        // Handle AJAX request to fetch UOM options
+        add_action('wp_ajax_get_uom_options', 'get_uom_options_ajax_handler');
+        // Handle the AJAX request to edit the case size and retrieve the available Unit of Measurement (UOM) options.
+        add_action('wp_ajax_get_uom_dropdown_html_handler', [$this, 'get_uom_dropdown_html_handler']);
+    
     }
-
+    
+    //enqueue the style css page
+    function flourish_woocommerce_plugin_enqueue_styles($hook_suffix) {
+        // Check if we are on the correct settings page
+       wp_enqueue_style('flourish-woocommerce-plugin-styles', plugin_dir_url(__FILE__) . '../../assets/css/style.css');
+    }
+    /**
+     * Register plugin settings for the Flourish WooCommerce plugin.
+     */
     public function register_settings()
     {
+        // Add the main settings section
         add_settings_section(
-            'flourish_woocommerce_plugin_section', 
+            'flourish_woocommerce_plugin_section',
             '⚙️ Settings from Flourish',
             null,
-            'flourish-woocommerce-plugin-settings',
+            'flourish-woocommerce-plugin-settings'
         );
 
-        // Do our regular text input based settings
-        $settings = [
+        // Define and add basic settings fields
+        $basic_settings = [
             'username' => 'Username',
             'api_key' => 'External API Key',
             'url' => 'API URL',
             'webhook_key' => 'Webhook Signing Key',
         ];
 
-        foreach ($settings as $key => $label) {
-            $setting_value = isset($this->existing_settings[$key]) ? $this->existing_settings[$key] : '';
+        foreach ($basic_settings as $key => $label) {
+            $value = $this->existing_settings[$key] ?? '';
             add_settings_field(
-                $key, 
-                $label, 
-                function() use ($key, $setting_value) {
-                    $this->render_setting_field($key, $setting_value);
-                }, 
-                'flourish-woocommerce-plugin-settings', 
-                'flourish_woocommerce_plugin_section',
+                $key,
+                $label,
+                function () use ($key, $value) {
+                    $this->render_setting_field($key, $value);
+                },
+                'flourish-woocommerce-plugin-settings',
+                'flourish_woocommerce_plugin_section'
             );
         }
 
-        if (empty($this->existing_settings['username']) || empty($this->existing_settings['api_key'])) {
-            $facilities = [];
-        } else {
-            try {
-                $facilities = $this->get_facilities();
-            } catch (\Exception $e) {
-                // Show a dismissable error message with the admin notice
-                add_action('admin_notices', function() use ($e) {
-                    ?>
-                    <div class="notice notice-error is-dismissible">
-                        <p><?php echo $e->getMessage(); ?></p>
-                    </div>
-                    <?php
-                });
-            }
-        }
-
-        $facility_id = isset($this->existing_settings['facility_id']) ? $this->existing_settings['facility_id'] : '';
-
+        // Handle facility settings
+        $facilities = $this->get_facilities_safe();
+        $facility_id = $this->existing_settings['facility_id'] ?? '';
         add_settings_field(
             'facility_id',
             'Facility',
-            function() use ($facility_id, $facilities) {
+            function () use ($facility_id, $facilities) {
                 $this->render_facility_id($facility_id, $facilities);
             },
             'flourish-woocommerce-plugin-settings',
-            'flourish_woocommerce_plugin_section',
+            'flourish_woocommerce_plugin_section'
         );
 
-        if (strlen($facility_id)) {
-            // We need to grab whether this facility requires a sales rep or not
-            $facility_config = $this->get_facility_config($facility_id);
-
-            if (empty($this->existing_settings['username']) || empty($this->existing_settings['api_key']) || (empty($facility_config) || !$facility_config['sales_rep_required_for_outbound'])) {
-                $sales_reps = [];
-            } else {
-                try {
-                    $sales_reps = $this->get_sales_reps();
-                } catch (\Exception $e) {
-                    // Show a dismissable error message with the admin notice
-                    add_action('admin_notices', function() use ($e) {
-                        ?>
-                        <div class="notice notice-error is-dismissible">
-                            <p><?php echo $e->getMessage(); ?></p>
-                        </div>
-                        <?php
-                    });
-                }
-            }
-
-            if (count($sales_reps)) {
-                $setting_value = isset($this->existing_settings['sales_rep_id']) ? $this->existing_settings['sales_rep_id'] : '';
-
+        // Handle sales rep settings if required
+        if (!empty($facility_id) && $this->is_sales_rep_required($facility_id)) {
+            $sales_reps = $this->get_sales_reps_safe();
+            if (!empty($sales_reps)) {
+                $sales_rep_id = $this->existing_settings['sales_rep_id'] ?? '';
                 add_settings_field(
                     'sales_rep_id',
                     'Sales Rep',
-                    function() use ($setting_value, $sales_reps) {
-                        $this->render_sales_rep_id($setting_value, $sales_reps);
+                    function () use ($sales_rep_id, $sales_reps) {
+                        $this->render_sales_rep_id($sales_rep_id, $sales_reps);
                     },
                     'flourish-woocommerce-plugin-settings',
-                    'flourish_woocommerce_plugin_section',
+                    'flourish_woocommerce_plugin_section'
                 );
             }
         }
 
-        // Add our radio button settings for Flourish order type
-        $setting_value = isset($this->existing_settings['flourish_order_type']) ? $this->existing_settings['flourish_order_type'] : '';
-
+        // Add order type settings
+        $order_type = $this->existing_settings['flourish_order_type'] ?? '';
+        $order_status = $this->existing_settings['flourish_order_status'] ?? '';
         add_settings_field(
             'flourish_order_type',
             'Order Type',
-            function() use ($setting_value) {
-                $this->render_flourish_order_type($setting_value);
+            function () use ($order_type, $order_status) {
+                $this->render_flourish_order_type($order_type, $order_status);
             },
             'flourish-woocommerce-plugin-settings',
-            'flourish_woocommerce_plugin_section',
+            'flourish_woocommerce_plugin_section'
         );
 
-        $item_sync_options = isset($this->existing_settings['item_sync_options']) ? $this->existing_settings['item_sync_options'] : [];
-
+        // Add item sync options settings
+        $item_sync_options = $this->existing_settings['item_sync_options'] ?? [];
         add_settings_field(
             'item_sync_options',
             'Item Sync Options',
-            function() use ($item_sync_options) {
+            function () use ($item_sync_options) {
                 $this->render_item_sync_options($item_sync_options);
             },
             'flourish-woocommerce-plugin-settings',
-            'flourish_woocommerce_plugin_section',
+            'flourish_woocommerce_plugin_section'
         );
 
-        // Get our brands
-        if (empty($this->existing_settings['username']) || empty($this->existing_settings['api_key'])) {
-            $brands = [];
-        } else {
-            try {
-                $brands = $this->get_brands();
-            } catch (\Exception $e) {
-                // Show a dismissable error message with the admin notice
-                add_action('admin_notices', function() use ($e) {
-                    ?>
-                    <div class="notice notice-error is-dismissible">
-                        <p><?php echo $e->getMessage(); ?></p>
-                    </div>
-                    <?php
-                });
-            }
-        }
-
-        // Fetch the saved brands from the settings.
-        $saved_brands = isset($this->existing_settings['brands']) ? $this->existing_settings['brands'] : [];
-        $filter_brands = isset($this->existing_settings['filter_brands']) ? $this->existing_settings['filter_brands'] : false;
-
-        // Add a settings field for brand checkboxes.
+        // Handle brand filter settings
+        $brands = $this->get_brands_safe();
+        $saved_brands = $this->existing_settings['brands'] ?? [];
+        $filter_brands = $this->existing_settings['filter_brands'] ?? false;
         add_settings_field(
             'brands',
             'Filter Brands',
-            function() use ($filter_brands, $saved_brands, $brands) {
+            function () use ($filter_brands, $saved_brands, $brands) {
                 $this->render_brands($filter_brands, $saved_brands, $brands);
             },
             'flourish-woocommerce-plugin-settings',
@@ -204,6 +169,67 @@ class SettingsPage
         );
     }
 
+    /**
+     * Safely retrieve facilities with error handling.
+     */
+    private function get_facilities_safe()
+    {
+        try {
+            return $this->get_facilities();
+        } catch (\Exception $e) {
+            $this->add_admin_notice($e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Check if a facility requires a sales representative.
+     */
+    private function is_sales_rep_required($facility_id)
+    {
+        $facility_config = $this->get_facility_config($facility_id);
+        return $facility_config['sales_rep_required_for_outbound'] ?? false;
+    }
+
+    /**
+     * Safely retrieve sales representatives with error handling.
+     */
+    private function get_sales_reps_safe()
+    {
+        try {
+            return $this->get_sales_reps();
+        } catch (\Exception $e) {
+            $this->add_admin_notice($e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Safely retrieve brands with error handling.
+     */
+    private function get_brands_safe()
+    {
+        try {
+            return $this->get_brands();
+        } catch (\Exception $e) {
+            $this->add_admin_notice($e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Add an admin notice for displaying error messages.
+     */
+    private function add_admin_notice($message)
+    {
+        add_action('admin_notices', function () use ($message) {
+            ?>
+            <div class="notice notice-error is-dismissible">
+                <p><?php echo esc_html($message); ?></p>
+            </div>
+            <?php
+        });
+    }
     public function sanitize_settings($settings)
     {
         $sanitized_settings = [];
@@ -215,7 +241,8 @@ class SettingsPage
 
         // Default to retail
         $sanitized_settings['flourish_order_type'] = !empty($settings['flourish_order_type']) ? sanitize_text_field($settings['flourish_order_type']) : 'retail';
-
+        // Default to created in retail order status
+        $sanitized_settings['flourish_order_status'] = !empty($settings['flourish_order_status']) ? sanitize_text_field($settings['flourish_order_status']) : 'created';
         // Default to production API
         $sanitized_settings['url'] = !empty($settings['url']) ? esc_url_raw($settings['url']) : 'https://app.flourishsoftware.com';
 
@@ -239,42 +266,66 @@ class SettingsPage
 
         return $sanitized_settings;
     }
-
+    /// This function renders a setting field based on the provided key and value.
+    /// It dynamically sets the input type (text, password, url) and handles special cases
+    /// for the 'webhook_key' field, generating a hashed value if the username and API key exist.
     public function render_setting_field($key, $setting_value)
     {
-        $input_type = 'text';
-        $readonly = '';
-        if ($key === 'url') {
-            $input_type = 'url';
+        $input_type = 'text'; // Default input type
+        $readonly = ''; // Default readonly attribute
 
-            if (empty($setting_value)) {
-                $setting_value = 'https://app.flourishsoftware.com';
-            }
-        } elseif ($key === 'api_key' && strlen($setting_value)) {
-            $input_type = 'password';
-        } elseif ($key === 'webhook_key') {
-            $readonly = 'readonly';
-            if (!isset($this->existing_settings['username']) || !strlen($this->existing_settings['username']) || !isset($this->existing_settings['api_key']) || !strlen($this->existing_settings['api_key'])) {
-                $setting_value = 'Provide your Username and API key';
-            } else {
-                $setting_value = sha1(sha1($this->existing_settings['username']) . sha1($this->existing_settings['api_key']));
-            }
+        // Determine input type and value based on the key
+        switch ($key) {
+            case 'url':
+                $input_type = 'url';
+                $setting_value = $setting_value ?: 'https://app.flourishsoftware.com';
+                break;
+
+            case 'api_key':
+                if (!empty($setting_value)) {
+                    $input_type = 'password';
+                }
+                break;
+
+            case 'webhook_key':
+                $readonly = 'readonly';
+
+                if (empty($this->existing_settings['username']) || 
+                    empty($this->existing_settings['api_key'])) {
+                    $setting_value = 'Provide your Username and API key';
+                } else {
+                    $setting_value = sha1(sha1($this->existing_settings['username']) . sha1($this->existing_settings['api_key']));
+                }
+                break;
         }
 
+        // Render the input field
         ?>
-        <input type="<?php echo $input_type; ?>" id="<?php echo $key; ?>" name="flourish_woocommerce_plugin_settings[<?php echo $key; ?>]" value="<?php echo esc_attr($setting_value); ?>" size="42" <?php echo $readonly; ?>/>
+        <input 
+            type="<?php echo esc_attr($input_type); ?>" 
+            id="<?php echo esc_attr($key); ?>" 
+            name="flourish_woocommerce_plugin_settings[<?php echo esc_attr($key); ?>]" 
+            value="<?php echo esc_attr($setting_value); ?>" 
+            size="42" 
+            <?php echo $readonly ? 'readonly' : ''; ?> 
+        />
         <?php
-        if ($key === 'webhook_key') {
-            ?>
-            <?php
-        }
     }
 
-    public function render_flourish_order_type($setting_value)
+    //Render flourish order type retail and outbound in setting page
+    public function render_flourish_order_type($setting_value,$order_status_value)
     {
         ?>
         <input type="radio" id="flourish_order_type_retail" name="flourish_woocommerce_plugin_settings[flourish_order_type]" value="retail" <?php checked($setting_value, 'retail'); ?> <?php checked($setting_value, ''); ?> />
         <label for="flourish_order_type_retail">Retail</label>
+        <div class="toggle-container">
+        <h4>Retail Order status:</h4>
+        <input type="radio" id="flourish_order_type_created" name="flourish_woocommerce_plugin_settings[flourish_order_status]" value="created" <?php checked($order_status_value, 'created'); ?> <?php checked($order_status_value, ''); ?> />
+        <label for="flourish_order_type_created">Created</label>
+        <input type="radio" id="flourish_order_type_submitted" name="flourish_woocommerce_plugin_settings[flourish_order_status]" value="submitted" <?php checked($order_status_value, 'submitted'); ?> />
+        <label for="flourish_order_type_submitted">Submitted</label>
+        </div>
+        <br>
         <p class="description">Orders will be created in Flourish as retail orders from customers.</p>
         <ul>
             <li>• Facility must be of type "retail"</li>
@@ -290,7 +341,8 @@ class SettingsPage
         </ul>
         <?php
     }
-
+    
+    
     public function render_settings_page()
     {
         $import_products_button_active = true;
@@ -359,18 +411,113 @@ class SettingsPage
 
             <hr>
 
+            <!-- Notification Alert Container -->
+            <div id="import-alert-container" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgb(0 0 0 / 80%); z-index: 9999; text-align: center; color: #fff;">
+                <div style="margin-top: 20%; font-size: 18px;">
+                    <p>Please do not refresh the page or go back until the import process is complete.</p>
+                    <p><strong>Importing Products...Please wait!</strong></p>
+                </div>
+            </div>
+
             <div class="wrap">
                 <h2>↔️ Import Flourish Items to WooCommerce Products</h2>
                 <p class="description">Once you have provided your username and external API key above, use this button to import items from the Flourish API into WooCommerce products.</p>
                 <br>
-                <form method="post">
-                    <?php wp_nonce_field('flourish-woocommerce-plugin-import-products', 'import_nonce'); ?>
-                    <input type="hidden" name="action" value="import_products">
-                    <input type="submit" id="import-products" class="button button-primary" value="Import Products" <?php echo $import_products_button_active ? '' : 'disabled'; ?>>
+                <form id="case-size-form">
+                <?php wp_nonce_field('case_size_nonce', 'case_size_nonce'); ?>
+                    
+                    <table class="wp-list-table widefat fixed striped">
+                        <thead>
+                            <tr>
+                            <th>Case Name</th>
+                            <th>Quantity</th>
+                            <th>Base UOM</th>
+                            <th>Actions</th>
+                            </tr>
+                        </thead>
+                            <tbody id="case-size-rows">
+                            <?php echo $this->fetch_existing_case_sizes(); ?>
+                            </tbody>
+                    </table>
+                    <hr>
+                    <div class="case-size-container">
+                        <input type="text" id="case-name" placeholder="Case Name" required />
+                        <input type="number" id="quantity" placeholder="Quantity" min="1" required />
+                        <?php  echo $this->display_uom_dropdown();?>
+                        <button type="button" id="add-case-row" class="button button-primary">+ Add Case Size</button>
+                    </div>
+                </form>
+                <hr>
+                <!-- Form for Import Products -->
+                <form method="post" id="handle-import-product-form">
+                <?php wp_nonce_field('flourish-woocommerce-plugin-import-products', 'import_nonce'); ?>
+                <input type="hidden" name="action" value="import_products">
+                <input type="submit" id="import-products" class="button button-primary" value="Import Products" <?php echo $import_products_button_active ? '' : 'disabled'; ?>>
                 </form>
             </div>
         </div>
+        <script>
+            document.addEventListener('DOMContentLoaded', function () {
+                const importForm = document.getElementById('handle-import-product-form');
+                const alertContainer = document.getElementById('import-alert-container');
+                if (importForm) {
+                    importForm.addEventListener('submit', function () {
+                        // Prevent scrolling
+                        document.body.style.overflow = 'hidden';
+                        // Show the alert container
+                        alertContainer.style.display = 'block';
+                    });
+                }
+            });
+        </script>
         <?php
+    }
+    function get_uom_options_ajax_handler()
+    {
+    // Assuming the 'display_uom_dropdown' method is part of the class
+    $uom_options = $this->display_uom_dropdown(); // Fetch UOM options
+    
+    // Return the options as the AJAX response (without the <select> element)
+    echo $uom_options;
+    
+    // Always call wp_die() to end the AJAX request
+    wp_die();
+    }
+   
+    public function display_uom_dropdown()
+    {
+        // Initialize the API object
+        $flourish_api = $this->get_flourish_api();
+
+        // Check if the API object is initialized
+        if (!$flourish_api) {
+            error_log('Flourish API object is not initialized.');
+            return '<option value="">Error initializing Flourish API.</option>';
+        }
+
+        // Fetch UOMs from the API
+        $uoms = $flourish_api->fetch_uoms();
+
+        // Log the response for debugging
+        error_log('UOMs response: ' . print_r($uoms, true));
+
+        // Check if UOMs are returned and are in the correct format
+        if ($uoms && is_array($uoms)) {
+            $options = '';
+            $options = '<select id="uom" required>';   // Start the dropdown
+            // Loop through the UOM data and create <option> elements
+            foreach ($uoms as $uom) {
+                $value = htmlspecialchars($uom['uom']); // UOM value
+                $description = htmlspecialchars($uom['description']); // UOM display text
+                $options .= "<option value=\"$value\">$description</option>";
+            }
+            // End the dropdown
+            $options .= '</select>'; 
+            return $options;  
+        } else {
+            error_log('No UOMs available.');
+            return '<option value="" style="color:red;padding:10px;font-size:14px;">No UOMs available.' . $uoms . '</option>'; // Return an error message if no UOM data is found
+        }
     }
 
     public function render_facility_id($setting_value, $facilities)
@@ -502,7 +649,7 @@ class SettingsPage
 
             add_action('admin_notices', function () use ($imported_count) {
                 ?>
-                <div class="notice notice-success is-dismissible">
+                <div class="notice notice-success is-dismissible" style="display:block !important;">
                     <p><span style="color: #00a32a;"><strong>Success!</strong></span> <?php _e($imported_count . ' Flourish items successfully synced with WooCommerce products.'); ?></p>
                 </div>
                 <?php
@@ -517,73 +664,352 @@ class SettingsPage
             });
         }
     }
-
-    public function import_products()
+    
+    // Helper method to initialize the FlourishAPI object
+    private function get_flourish_api()
     {
-        // Retrieve the saved settings.
         $api_key = isset($this->existing_settings['api_key']) ? $this->existing_settings['api_key'] : '';
         $username = isset($this->existing_settings['username']) ? $this->existing_settings['username'] : '';
         $url = isset($this->existing_settings['url']) ? $this->existing_settings['url'] : '';
         $facility_id = isset($this->existing_settings['facility_id']) ? $this->existing_settings['facility_id'] : '';
-        $brands = isset($this->existing_settings['brands']) ? $this->existing_settings['brands'] : [];
-        $filter_brands = isset($this->existing_settings['filter_brands']) ? $this->existing_settings['filter_brands'] : false;
-        $item_sync_options = isset($this->existing_settings['item_sync_options']) ? $this->existing_settings['item_sync_options'] : [];
 
-        // Perform the API call to fetch the products.
-        $flourish_api = new FlourishAPI($username, $api_key, $url, $facility_id);
-        $flourish_items = new FlourishItems($flourish_api->fetch_products($filter_brands, $brands));
-
-        // Import the products into WooCommerce.
-        $imported_count = $flourish_items->save_as_woocommerce_products($item_sync_options);
-
-        return $imported_count;
+        return new FlourishAPI($username, $api_key, $url, $facility_id);
+    }
+    
+    public function import_products() {
+        $flourish_api = $this->get_flourish_api();
+        return $flourish_api->fetch_products($this->existing_settings['filter_brands'] ?? false, $this->existing_settings['brands'] ?? []); // Call fetch_products, which now handles processing
     }
 
     public function get_facilities()
     {
-        $api_key = isset($this->existing_settings['api_key']) ? $this->existing_settings['api_key'] : '';
-        $username = isset($this->existing_settings['username']) ? $this->existing_settings['username'] : '';
-        $url = isset($this->existing_settings['url']) ? $this->existing_settings['url'] : '';
-        $facility_id = isset($this->existing_settings['facility_id']) ? $this->existing_settings['facility_id'] : '';
+        // Fetch the API object
+        $flourish_api = $this->get_flourish_api();
 
-        $flourish_api = new FlourishAPI($username, $api_key, $url, $facility_id);
-
+        // Return the facilities data
         return $flourish_api->fetch_facilities();
     }
 
     public function get_brands()
     {
-        $api_key = isset($this->existing_settings['api_key']) ? $this->existing_settings['api_key'] : '';
-        $username = isset($this->existing_settings['username']) ? $this->existing_settings['username'] : '';
-        $url = isset($this->existing_settings['url']) ? $this->existing_settings['url'] : '';
-        $facility_id = isset($this->existing_settings['facility_id']) ? $this->existing_settings['facility_id'] : '';
+        // Fetch the API object
+        $flourish_api = $this->get_flourish_api();
 
-        $flourish_api = new FlourishAPI($username, $api_key, $url, $facility_id);
-
+        // Return the brands data
         return $flourish_api->fetch_brands();
     }
 
     public function get_sales_reps()
     {
-        $api_key = isset($this->existing_settings['api_key']) ? $this->existing_settings['api_key'] : '';
-        $username = isset($this->existing_settings['username']) ? $this->existing_settings['username'] : '';
-        $url = isset($this->existing_settings['url']) ? $this->existing_settings['url'] : '';
-        $facility_id = isset($this->existing_settings['facility_id']) ? $this->existing_settings['facility_id'] : '';
+        // Fetch the API object
+        $flourish_api = $this->get_flourish_api();
 
-        $flourish_api = new FlourishAPI($username, $api_key, $url, $facility_id);
-
+        // Return the sales reps data
         return $flourish_api->fetch_sales_reps();
     }
 
     public function get_facility_config($facility_id)
     {
-        $api_key = isset($this->existing_settings['api_key']) ? $this->existing_settings['api_key'] : '';
-        $username = isset($this->existing_settings['username']) ? $this->existing_settings['username'] : '';
-        $url = isset($this->existing_settings['url']) ? $this->existing_settings['url'] : '';
-        $facility_id = isset($this->existing_settings['facility_id']) ? $this->existing_settings['facility_id'] : '';
-
-        $flourish_api = new FlourishAPI($username, $api_key, $url, $facility_id);
-
-        return $flourish_api->fetch_facility_config($facility_id);
+        // Fetch the API object
+        $flourish_api = $this->get_flourish_api();
+        if(!empty($facility_id))
+        {
+            // Return the facility config
+            return $flourish_api->fetch_facility_config($facility_id);
+        }
+        else
+        {
+            return true;
+        }
     }
+    
+    /**
+     * This function checks whether case sizes already exist.
+     */
+    public function fetch_existing_case_sizes()
+    {
+        $attributes = wc_get_attribute_taxonomies();
+        $rows = '';
+        $has_records = false; // Flag to check if any records exist    
+        foreach ($attributes as $attribute)
+        {
+            $terms = get_terms('pa_' . $attribute->attribute_name, ['hide_empty' => false]);
+            if (!empty($terms))
+            {
+                foreach ($terms as $term)
+                {
+                    $quantity = get_term_meta($term->term_id, 'quantity', true);
+                    $base_uom = get_term_meta($term->term_id, 'base_uom', true);
+                    // Get the taxonomy object to access taxonomy name
+                    $taxonomy = 'pa_' . $attribute->attribute_name; // Correct taxonomy slug
+                    $taxonomy_name = $taxonomy ? $taxonomy : ''; // Correct taxonomy slug
+                     // Create the table rows with taxonomy name in the data-term-name attribute
+                    $rows .= $this->render_case_size_row($term->term_id, $term->name, $quantity, $base_uom, $taxonomy);
+                    $has_records = true; // Set flag to true as records are found
+                }
+            }
+        }    
+        // If no records are found, show "No records found" message
+        if (!$has_records)
+        {
+            $rows .= '<tr><td colspan="4" style="text-align: center;" id="no-records-row">No records found</td></tr>';
+        }
+   
+        return $rows;
+    }
+       
+    /**
+     * Unified function to handle Add/Edit operations for case sizes.
+     */
+ 
+    function handle_ajax_add_edit_case_size()
+    {
+        // Verify nonce for security
+        if (!isset($_POST['security']) || !wp_verify_nonce($_POST['security'], 'case_size_nonce'))
+        {
+            wp_send_json_error(['message' => 'Invalid security token.']);
+        }
+        // Get POST data
+        $term_id = isset($_POST['term_id']) ? intval($_POST['term_id']) : null;
+        $case_name = sanitize_text_field($_POST['case_name']);
+        $quantity = intval($_POST['quantity']);
+        $base_uom = sanitize_text_field($_POST['base_uom']);
+        if (empty($case_name) || empty($quantity) || empty($base_uom)) {
+            wp_send_json_error(['message' => 'All fields are required.']);
+        }
+ 
+        $base_uom_slug = sanitize_title($base_uom);
+        $taxonomy_name = 'pa_' . $base_uom_slug;
+        // Ensure the attribute exists
+        if (!$this->check_if_attribute_exists($base_uom_slug))
+        {
+            $this->create_base_uom_attribute($base_uom, $taxonomy_name);
+        }
+        // Handle Add or Edit operation
+        if ($term_id)
+        {
+            $this->update_case_size($term_id, $case_name, $quantity, $base_uom, $taxonomy_name);
+        }
+        else
+        {
+            $this->add_case_size($case_name, $quantity, $base_uom, $taxonomy_name);
+        }
+    }
+ 
+    /**
+     * Update case size term.
+     */
+    private function update_case_size($term_id, $case_name, $quantity, $base_uom, $taxonomy_name)
+    {
+        $existing_uom = get_term_meta($term_id, 'base_uom', true);
+        // Handle UOM change
+        if ($existing_uom !== $base_uom)
+        {
+            wp_delete_term($term_id, 'pa_' . sanitize_title($existing_uom));
+            $this->add_case_size($case_name, $quantity, $base_uom, $taxonomy_name);
+        }
+        else
+        {
+            // Update term details
+            if (!term_exists($term_id, $taxonomy_name))
+            {
+                wp_send_json_error(['message' => 'The term does not exist.']);
+            }
+            $term_update = wp_update_term($term_id, $taxonomy_name, ['name' => $case_name]);
+            if (is_wp_error($term_update))
+            {
+                wp_send_json_error(['message' => 'Failed to update the case name.']);
+            }
+            $this->update_term_meta($term_id, $quantity, $base_uom,$case_name);
+            $row_html = $this->render_case_size_row($term_id, $case_name, $quantity, $base_uom, $taxonomy_name);
+            wp_send_json_success(['row_html' => $row_html, 'message' => 'Case Name updated successfully.']);
+        }
+    }
+ 
+    /**
+     * Add new case size term.
+     */
+    private function add_case_size($case_name, $quantity, $base_uom, $taxonomy_name)
+    {
+        $term_slug = sanitize_title($case_name);
+        $term = term_exists($term_slug, $taxonomy_name);
+        if ($term)
+        {
+            wp_send_json_error(['message' => 'Case Name already exists.']);
+        }
+        $result = wp_insert_term($term_slug, $taxonomy_name, ['slug' => $term_slug]);
+        if (is_wp_error($result))
+        {
+            wp_send_json_error(['message' => 'Error creating term: ' . $result->get_error_message()]);
+        }
+        $term_id = $result['term_id'];
+        $this->update_term_meta($term_id, $quantity, $base_uom,$case_name);
+        $row_html = $this->render_case_size_row($term_id, $case_name, $quantity, $base_uom, $taxonomy_name);
+        wp_send_json_success(['row_html' => $row_html, 'message' => 'Case Name added successfully.']);
+    }
+ 
+    /**
+     * Update term meta for quantity and base UOM.
+     */
+    private function update_term_meta($term_id, $quantity, $base_uom,$case_name)
+    {
+        update_term_meta($term_id, 'case_name', $case_name);
+        update_term_meta($term_id, 'quantity', $quantity);
+        update_term_meta($term_id, 'base_uom', $base_uom);
+    }
+ 
+    /**
+     * Helper function to create a base_uom attribute if it doesn't exist.
+     */
+    private function create_base_uom_attribute($base_uom, $taxonomy_name)
+    {
+        $attribute = wc_create_attribute([
+            'name' => 'pa_' . sanitize_title($base_uom),
+            'slug' => $taxonomy_name,
+            'type' => 'select',
+            'order_by' => 'menu_order',
+            'has_archives' => false,
+        ]);
+ 
+        if (is_wp_error($attribute))
+        {
+            wp_send_json_error(['message' => 'Error creating base_uom attribute: ' . $attribute->get_error_message()]);
+        }
+        register_taxonomy(
+            $taxonomy_name,
+            'product',
+            [
+                'labels' => [
+                    'name' => __('Base UOM', 'woocommerce'),
+                    'singular_name' => __('Base UOM', 'woocommerce'),
+                ],
+                'hierarchical' => true,
+                'show_ui' => false,
+                'query_var' => true,
+                'rewrite' => false,
+            ]
+        );
+        flush_rewrite_rules();
+    }
+   
+    /**
+     * Helper function to check if the attribute exists.
+     *
+     * @param string $slug
+     * @return bool
+     */
+    private function check_if_attribute_exists($slug)
+    {
+       global $wpdb;
+        // Check if the attribute exists in the WooCommerce attribute taxonomies table
+        $result = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT attribute_id FROM {$wpdb->prefix}woocommerce_attribute_taxonomies WHERE attribute_name = %s",
+                $slug
+            )
+        );
+        return !empty($result);
+    }
+    /**
+     * Helper function to generate HTML for a case size row.
+     *
+     * @param int $term_id
+     * @param string $case_name
+     * @param string $quantity
+     * @param string $base_uom
+     * @param string $taxonomy
+     * @return string
+     */
+    private function render_case_size_row($term_id, $case_name, $quantity, $base_uom, $taxonomy)
+    {
+        $term_slug = $case_name; // Your input string
+        $term_name = str_replace('-', ' ', $term_slug); // Replace underscores with spaces
+        ob_start();
+        echo '<tr>';
+        echo '<td class="casename">' . esc_html($term_name) . '</td>';
+        echo '<td class="quantity">' . esc_html($quantity) . '</td>';
+        echo '<td class="base_uom">' . esc_html($base_uom) . '</td>';
+        echo '<td class="actions">';
+        echo '<a href="#" class="edit-case-size" data-term-name="' . esc_attr($taxonomy) . '" data-term-id="' . esc_attr($term_id) . '">Edit</a> | ';
+        echo '<a href="#" class="delete-case-size" data-term-name="' . esc_attr($taxonomy) . '" data-term-id="' . esc_attr($term_id) . '">Delete</a>';
+        echo '</td>';
+        echo '</tr>';
+        return ob_get_clean();
+    }
+ 
+    /**
+     * Helper function to Delete attributes.
+     */
+    public function handle_ajax_delete_case_size()
+    {
+        // Verify nonce for security
+        if (!isset($_POST['security']) || !wp_verify_nonce($_POST['security'], 'delete_case_size_nonce'))
+        {
+            wp_send_json_error(['message' => 'Invalid security token.']);
+        }
+        // Get the term ID and taxonomy (pa_{attribute_name})
+        $term_id = intval($_POST['term_id']);
+        $taxonomy = sanitize_text_field($_POST['taxonomy']); // Ensure correct taxonomy is passed
+        // Check if the term exists
+        if (!term_exists($term_id, $taxonomy))
+        {
+            wp_send_json_error(['message' => 'The term does not exist or has already been deleted.']);
+        }    
+        // Attempt to delete the term
+        $result = wp_delete_term($term_id, $taxonomy);    
+        if (is_wp_error($result))
+        {
+            wp_send_json_error(['message' => 'Error deleting term: ' . $result->get_error_message()]);
+        }
+        elseif ($result === false)
+        {
+            wp_send_json_error(['message' => 'The term could not be deleted.']);
+        } 
+         
+              // Check if the taxonomy (attribute) still exists after deletion
+    // Check if the taxonomy (attribute) still exists after deletion
+    $terms = get_terms([
+        'taxonomy'   => $taxonomy,
+        'hide_empty' => false,
+    ]);
+
+    if (empty($terms)) {
+        // If no terms exist, delete the attribute
+        global $wpdb;
+        $attribute_name = str_replace('pa_', '', $taxonomy);
+
+        // Check if the attribute exists in WooCommerce's attribute table
+        $attribute_id = $wpdb->get_var($wpdb->prepare("
+            SELECT attribute_id
+            FROM {$wpdb->prefix}woocommerce_attribute_taxonomies
+            WHERE attribute_name = %s
+        ", $attribute_name));
+
+        if ($attribute_id) {
+            // Delete the attribute from WooCommerce's attribute table
+            $wpdb->delete(
+                $wpdb->prefix . 'woocommerce_attribute_taxonomies',
+                ['attribute_name' => $attribute_name],
+                ['%s']
+            );
+
+            // Flush WooCommerce attributes cache
+            delete_transient('wc_attribute_taxonomies');
+        }
+    }
+        
+        // Success
+        wp_send_json_success(['message' => 'Case Name deleted successfully.']);
+    }
+
+    /**
+     *  function to handle Edit operations for case sizes to retrieve the available Unit of Measurement (UOM) options. 
+     */
+    function get_uom_dropdown_html_handler() {
+        // 'display_uom_dropdown' method is part of the class
+        $uom_options = $this->display_uom_dropdown(); // Fetch UOM options
+        // Return success response
+        wp_send_json_success(['html' => $uom_options]);
+    }
+    
 }

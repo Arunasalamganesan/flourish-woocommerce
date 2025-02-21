@@ -4,14 +4,8 @@ namespace FlourishWooCommercePlugin;
 
 defined( 'ABSPATH' ) || exit;
 
-use FlourishWooCommercePlugin\Admin\SettingsPage;
-use FlourishWooCommercePlugin\API\FlourishWebhook;
-use FlourishWooCommercePlugin\CustomFields\DateOfBirth;
-use FlourishWooCommercePlugin\CustomFields\FlourishOrderID;
-use FlourishWooCommercePlugin\CustomFields\License;
-use FlourishWooCommercePlugin\Handlers\HandlerOrdersOutbound;
-use FlourishWooCommercePlugin\Handlers\HandlerOrdersRetail;
-use FlourishWooCommercePlugin\Handlers\HandlerOrdersSyncNow;
+use FlourishWooCommercePlugin\Services\ServiceProvider;
+
 
 class FlourishWooCommercePlugin
 {
@@ -38,39 +32,13 @@ class FlourishWooCommercePlugin
             $existing_settings = [];
         }
 
-        // Register the settings page.
-        $settings_page = new SettingsPage($existing_settings, $plugin_basename);
-        $settings_page->register_hooks();
+        // Register services
+        $service_provider = new ServiceProvider($existing_settings, $plugin_basename);
+        $service_provider->register_services();
 
-        // Register the custom fields and order handler based on the order type.
-        if (!isset($existing_settings['flourish_order_type']) || $existing_settings['flourish_order_type'] === 'retail') {
-            $custom_field_date_of_birth = new DateOfBirth();
-            $custom_field_date_of_birth->register_hooks();
-
-            $handler_orders_retail = new HandlerOrdersRetail($existing_settings);
-            $handler_orders_retail->register_hooks();
-        } else {
-            $custom_field_license = new License();
-            $custom_field_license->register_hooks();
-
-            $handler_orders_outbound = new HandlerOrdersOutbound($existing_settings);
-            $handler_orders_outbound->register_hooks();
-        }
-
-        // Register the webhook handler.
-        $flourish_webhook = new FlourishWebhook($existing_settings);
-        $flourish_webhook->register_hooks();
-
-        // Register the Flourish ID field on the order page.
-        $custom_field_flourish_id = new FlourishOrderID();
-        $custom_field_flourish_id->register_hooks();
-
-        // Register the custom order handler to sync orders on demand.
-        $handler_orders_sync_now = new HandlerOrdersSyncNow($existing_settings);
-        $handler_orders_sync_now->register_hooks();
-
-        // Add our JavaScript
-        add_action('admin_enqueue_scripts', function() {
+       // Add our JavaScript
+        add_action('admin_enqueue_scripts', function($hook) {
+            // Enqueue the general plugin JavaScript
             wp_enqueue_script(
                 'flourish-woocommerce-plugin', 
                 plugin_dir_url(dirname(__FILE__)) . 'assets/js/flourish-woocommerce-plugin.js', 
@@ -78,15 +46,70 @@ class FlourishWooCommercePlugin
                 '1.0.0', 
                 true
             );
+
+            wp_enqueue_script(
+                'case-size-js',  
+                plugin_dir_url(dirname(__FILE__)) . 'assets/js/flourish-custom-script.js', 
+                ['jquery'], 
+                '1.0.0', 
+                 true
+            );
+
+            wp_localize_script('case-size-js', 'ajax_object', [
+                'ajax_url' => admin_url('admin-ajax.php'),
+                'nonce'    => wp_create_nonce('case_size_nonce'),
+                'deleteNonce' => wp_create_nonce('delete_case_size_nonce'),
+            ]);
+
+            // Enqueue scripts only on user profile pages
+            if ('profile.php' === $hook || 'user-edit.php' === $hook) {
+                wp_enqueue_script(
+                    'license-management', 
+                    plugin_dir_url(dirname(__FILE__)) . 'assets/js/license-management-outbound.js', 
+                    ['jquery'], 
+                    '1.0.0', 
+                    true
+                );
+
+                wp_localize_script('license-management', 'licenseData', [
+                    'ajax_url' => admin_url('admin-ajax.php'),
+                    'nonce'    => wp_create_nonce('license_management_nonce'),
+                ]);
+            }
+        });
+
+        add_action('wp_enqueue_scripts', function($hook) {
+            // Enqueue custom styles (for front-end)
+            wp_enqueue_style(
+                'save-cart-style',  // Make sure you are using a unique handle
+                plugin_dir_url(dirname(__FILE__)) . 'assets/css/save-cart-style.css', 
+                [], // No dependencies
+                '1.0.0', // Version
+                'all' // Media type
+            );
+            wp_enqueue_script(
+                'flourish-cart-js',  
+                plugin_dir_url(dirname(__FILE__)) . 'assets/js/flourish-cart.js', 
+                ['jquery'], 
+                '1.0.0', 
+                 true
+            );
+            // In PHP (add nonce to localize script)
+            wp_localize_script('flourish-cart-js', 'stockAvailability', [
+                'ajax_url' => admin_url('admin-ajax.php'),
+                'nonce' => wp_create_nonce('flourish_cart_nonce')
+            ]);
+           
         });
     }
-
     public function activate()
     {
+     
     }
 
     public function deactivate()
     {
+    
     }
 
     public function uninstall()
