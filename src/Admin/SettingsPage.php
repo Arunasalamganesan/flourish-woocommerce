@@ -21,6 +21,17 @@ class SettingsPage
 
     public function register_hooks()
     {
+        $order_type = isset($this->existing_settings['flourish_order_type']) ? $this->existing_settings['flourish_order_type'] : false;
+ 
+        if ($order_type !== 'retail') // check flourish order type
+        { 
+            add_action('plugins_loaded', function () {
+                //if (class_exists('WC_Email')) {
+                    add_filter('woocommerce_email_classes', [$this, 'register_draft_order_email']);
+                //}
+            });
+        }
+        
         add_filter('plugin_action_links_' . $this->plugin_basename, [$this, 'add_settings_link']);
         // Get the settings page to show up in the admin menu
         add_action('admin_menu', function() {
@@ -1010,6 +1021,21 @@ class SettingsPage
         $uom_options = $this->display_uom_dropdown(); // Fetch UOM options
         // Return success response
         wp_send_json_success(['html' => $uom_options]);
+    }
+    public function register_draft_order_email($emails)
+    {
+         
+        $email_class_file = plugin_dir_path(dirname(__DIR__)). 'classes/emails/class-wc-email-draft-order.php';
+
+        
+        if (file_exists($email_class_file)) {
+            require_once $email_class_file;
+            $emails['WC_Email_Draft_Order'] = new \WC_Email_Draft_Order();
+        } else {
+            error_log('Draft order email class file missing.');
+        }
+    
+        return $emails;
     }
     
 }
