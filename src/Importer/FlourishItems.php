@@ -1,22 +1,22 @@
 <?php
- 
+
 namespace FlourishWooCommercePlugin\Importer;
- 
+
 defined('ABSPATH') || exit;
- 
+
 use WC_Product_Simple;
 use WC_Product_Variable;
 use WC_Product_Attribute;
- 
+
 class FlourishItems
 {
     public $items = [];
- 
+
     public function __construct($items)
     {
         $this->items = $items;
     }
- 
+
     /**
      * Map Flourish items to WooCommerce products.
      *
@@ -28,10 +28,10 @@ class FlourishItems
         if (!count($this->items)) {
             throw new \Exception("No items to map.");
         }
- 
+
         return array_map([$this, 'map_flourish_item_to_woocommerce_product'], $this->items);
     }
- 
+
     /**
      * Save items as WooCommerce products.
      *
@@ -41,221 +41,367 @@ class FlourishItems
     public function save_as_woocommerce_products($item_sync_options = [])
     {
         $imported_count = 0;
-        $products = $this->map_items_to_woocommerce_products();
- 
-        foreach ($products as $product) {
+
+        foreach ($this->map_items_to_woocommerce_products() as $product) {
             if (!strlen($product['sku'])) {
                 continue;
             }
- 
-            $wc_product = $this->get_existing_or_new_product($product['sku'], $product['uom']);
-            
+
+            $wc_product = $this->get_existing_or_new_product($product['sku'],$product['uom']);
+            $new_product = $wc_product->get_id() === 0;
+
+            // Update product attributes
             $product_id = $this->update_product_attributes($wc_product, $product, $item_sync_options);
-           
-            if (!empty($product['item_category'])) {
+
+            // Assign category if applicable
+            if ($new_product || (!empty($item_sync_options['categories']) && !empty($product['item_category']))) {
                 $this->assign_product_category($product['item_category'], $product_id);
             }
-             
- 
+
+            // Trigger custom action after import
             do_action('flourish_item_imported', $product, $product_id);
- 
+
             if ($product_id > 0) {
                 $imported_count++;
             }
         }
- 
+
         return $imported_count;
     }
- 
-    private function get_existing_or_new_product($sku, $uom) {
-        $product_id = wc_get_product_id_by_sku($sku); // Direct lookup by SKU
- 
- 
-        if ($product_id) {
-        $product = wc_get_product($product_id);
- 
-        if ($product) {
+
+    /**
+     * Get an existing product by SKU or create a new one.
+     *
+     * @param string $sku
+     * @return WC_Product_Simple
+     */
+    private function get_existing_or_new_product($sku,$uom)
+    {
+        // Check for existing products by SKU
+        $existing_products = wc_get_products([
+            'sku' => $sku,
+            'limit' => 1,
+        ]);
+
+            
+            $attribute_exists = false;
+            $attribute_uom='';
+            
+             
+         
+        if (!empty($existing_products)) {
+            $product = $existing_products[0];
+             
+
+            // Check if the existing product is a variable product
+           if ($product->is_type('variable'))
+           { 
+             
+
+            // If the product is a variation, get its parent
             if ($product->is_type('variation')) {
-                return wc_get_product($product->get_parent_id());
+                $parent_id = $product->get_parent_id();
+                $parent_product = wc_get_product($parent_id);
+                error_log("Found variation SKU. Parent variable product ID: " . $parent_id);
+                return $parent_product;
             }
+
+            // Return the found product
+            error_log("Found product ID: " . $product->get_id());
             return $product;
         }
- 
-        error_log("Invalid product for SKU: " . $sku);
-        return null;
+        else
+        {
+            return $product;
         }
- 
-        $is_variable = in_array('pa_' . sanitize_title($uom), array_map(fn($a) => 'pa_' . $a->attribute_name, wc_get_attribute_taxonomies()));
-        $new_product = $is_variable ? new WC_Product_Variable() : new WC_Product_Simple();
- 
-        $new_product->set_sku($sku);
-        $new_product->set_status('draft');
- 
-        if ($new_product->save()) {
-        error_log("New product created with ID: " . $new_product->get_id());
+            
+        }
+        else
+        {
+            $attributes = wc_get_attribute_taxonomies();
+            foreach ($attributes as $attribute) {  
+            $taxonomy = 'pa_'. $attribute->attribute_name;
+                if ($taxonomy === 'pa_'.sanitize_title($uom)) {
+                $attribute_exists = true;
+                $attribute_uom=$uom;
+                break;
+                }
+            }      
+        if ($attribute_exists)
+        {
+            
+        $new_product = new WC_Product_Variable(); // Create a variable product
+        }
+        else
+        {
+             
+        $new_product = new WC_Product_Simple(); // Create a variable product
+       
+        }
+        $new_product->set_sku($sku); // Assign the SKU
+        $new_product->set_status('draft'); // set  product status "draft"
+        $new_product->save(); // Save to generate an ID
+
+        error_log("New variable product created with ID: " . $new_product->get_id());
         return $new_product;
-        }
- 
-        error_log("Error saving new product for SKU: " . $sku);
-        return null;
-}
- 
- 
- 
-private function update_product_attributes($wc_product, $product, $item_sync_options) {
-    $this->save_custom_fields_automated($wc_product, $product); // Keep if optimized
- 
-    foreach (['name', 'description', 'price'] as $field) {
-        if (empty($item_sync_options[$field]) || $item_sync_options[$field]) {
-            $setter = 'set_' . $field;
-            $wc_product->$setter($product[$field]);
    
-            if ($field === 'price') { // Ensure both price and regular price are set
-                $wc_product->set_regular_price($product[$field]);
-                $wc_product->update_meta_data('_price', $product[$field]);
+     }
+    }
+
+
+    /**
+     * Update product attributes.
+     *
+     * @param WC_Product_Simple $wc_product
+     * @param array $product
+     * @param array $item_sync_options
+     */
+    private function update_product_attributes($wc_product, $product, $item_sync_options)
+    {
+       
+       // Save meta fields
+       $this->save_custom_fields_automated($wc_product, $product);
+        if (empty($item_sync_options['name']) || $item_sync_options['name']) {
+            $wc_product->set_name($product['name']);
+        }
+
+        if (empty($item_sync_options['description']) || $item_sync_options['description']) {
+            $wc_product->set_description($product['description']);
+        }
+
+        if (empty($item_sync_options['price']) || $item_sync_options['price']) {
+            $wc_product->set_price($product['price']);
+            $wc_product->set_regular_price($product['price']);
+            update_post_meta($wc_product->get_id(), '_price', $product['price']);
+        }
+
+        $wc_product->set_sku($product['sku']);
+
+        // Enable stock management and set stock quantity
+        if (method_exists($wc_product, 'set_manage_stock')) {
+            $wc_product->set_manage_stock(true);
+        } else {
+            $wc_product->update_meta_data('_manage_stock', 'yes');
+        }
+        $product_id = $wc_product->get_id();
+        $reserved_stock = (int) get_post_meta($product_id, '_reserved_stock', true);
+        $flourish_stock = $product['inventory_quantity'];
+        $woocommerce_stock = $flourish_stock - $reserved_stock;
+        $wc_product->set_stock_quantity($woocommerce_stock); 
+        // Save the product and get its ID
+        $product_id = $wc_product->save(); // Persist changes to the database. 
+        if ($wc_product->is_type('variable')) {
+            $this->create_attributes($wc_product, $product);
+            wc_delete_product_transients($wc_product->get_id()); // Clear product cache
+        }
+        
+        
+        return $product_id;
+    }
+
+    /** fetch the woocommerce attributes */
+    private function create_attributes($wc_product, $product)
+    {
+       
+        // Fetch the UOM value from the product meta
+        $uom = get_post_meta($wc_product->get_id(), 'uom', true);
+       
+        if (empty($uom)) {           
+            update_post_meta($wc_product->get_id(), $product['uom'], true); 
+            return; // Exit if no UOM value exists
+        }
+
+        $attributes = wc_get_attribute_taxonomies(); // Fetches all attribute taxonomies
+        $product_attributes = [];
+
+        foreach ($attributes as $attribute) {
+            $taxonomy = 'pa_'. $attribute->attribute_name; // Example: pa_size  pa_g
+            //$attribute_label='base_uom_'. $attribute->attribute_name; // Example:Base UOM - ea   base_uom_g
+
+
+            // Check if the attribute name slug matches the UOM value
+        if ($taxonomy === 'pa_'.sanitize_title($uom) && taxonomy_exists($taxonomy)) {
+                // Fetch terms for the attribute
+                $terms = get_terms(['taxonomy' => $taxonomy, 'hide_empty' => false]);
+                if (!empty($terms)) {
+                    
+                    $term_names = wp_list_pluck($terms, 'slug'); // Get term names
+                    // Assign attribute to the product
+                    $product_attribute = new WC_Product_Attribute();
+                    $product_attribute->set_name($taxonomy);
+                    $product_attribute->set_options($term_names);
+                    $product_attribute->set_visible(true);
+                    $product_attribute->set_variation(true);
+                    $product_attributes[] = $product_attribute;
+                }
             }
         }
-    }
-    $wc_product->set_sku($product['sku']);
- 
-    if (method_exists($wc_product, 'set_manage_stock')) {
-        $wc_product->set_manage_stock(true);
-    } else {
-        $wc_product->update_meta_data('_manage_stock', 'yes');
-    }
- 
-    $product_id = $wc_product->get_id();
-    $reserved_stock = get_post_meta($product_id, '_reserved_stock', true); // No need for (int) cast here
-    $flourish_stock = $product['inventory_quantity'];
-    $woocommerce_stock = $flourish_stock - ($reserved_stock ? (int)$reserved_stock : 0); // Handle empty reserved stock
-    $wc_product->set_stock_quantity($woocommerce_stock);
- 
-    $product_id = $wc_product->save(); // Save ONCE
- 
-    if ($wc_product->is_type('variable')) {
-        $this->create_attributes($wc_product, $product); // Optimize if needed
-        wc_delete_product_transients($wc_product->get_id());
-    }
- 
-    return $product_id;
-}
- 
-private function create_attributes($wc_product, $product) {
-    $uom = get_post_meta($wc_product->get_id(), 'uom', true);
- 
-    if (empty($uom)) {
-        update_post_meta($wc_product->get_id(), 'uom', $product['uom']); // Set UOM directly
-        return;
-    }
- 
-    $taxonomy = 'pa_' . sanitize_title($uom); // Directly build taxonomy name
-    if (taxonomy_exists($taxonomy)) {
-        $term_names = wp_list_pluck(get_terms(['taxonomy' => $taxonomy, 'hide_empty' => false]), 'slug');
- 
-        if (!empty($term_names)) {
-            $product_attribute = new WC_Product_Attribute();
-            $product_attribute->set_name($taxonomy);
-            $product_attribute->set_options($term_names);
-            $product_attribute->set_visible(true);
-            $product_attribute->set_variation(true);
-            $wc_product->set_attributes([$product_attribute]); // Set attributes directly (no loop)
-            $wc_product->save(); // Save after setting attributes
- 
-            $this->generate_product_variations($wc_product->get_id(), [$taxonomy => $term_names]); // Pass simplified attributes data
+
+        // Set the product attributes on the WC_Product_Variable object
+        $wc_product->set_attributes($product_attributes);
+        $wc_product->save();
+
+        // Step 2: Generate Variations
+        // Create variations based on the attributes
+        $attributes_data = [];
+        foreach ($product_attributes as $attribute) {
+            $taxonomy = $attribute->get_name(); // Example: base_uom_g
+            $options = $attribute->get_options(); // Example: Small, Medium, Large
+            $attributes_data[$taxonomy] = $options;
         }
-    }
- 
-    error_log('Attributes synced and variations created for product ID: ' . $wc_product->get_id());
-}
- 
- 
- 
-private function generate_product_variations($product_id, $attributes_data) {
-    $product = wc_get_product($product_id);
- 
-    if (!$product || !$product->is_type('variable') || $product->get_stock_status() === 'outofstock') {
-        return; // Early exit if not variable, out of stock, or invalid product
-    }
- 
-    foreach ($attributes_data as $taxonomy => $options) {
-        if (!taxonomy_exists($taxonomy)) {
-            $this->create_attribute_taxonomy($taxonomy);
+
+        if (!empty($attributes_data)) {
+            $this->generate_product_variations($wc_product->get_id(), $attributes_data);
         }
- 
-        foreach ($options as $option) {
-            $option = trim($option);
-            if (!empty($option) && !term_exists($option, $taxonomy)) {
-                wp_insert_term($option, $taxonomy);
+
+        error_log('Attributes synced and variations created for product ID: ' . $wc_product->get_id());
+    }
+
+
+    private function generate_product_variations($product_id, $attributes_data)
+    {
+        // Fetch the product
+        $product = wc_get_product($product_id);
+    
+        // Exit if the product is not a variable type
+        if (!$product || !$product->is_type('variable')) {
+            return;
+        }
+    
+        // Check stock status; skip stock calculations if the product is out of stock
+        if ($product->get_stock_status() === 'outofstock') {
+            error_log("Product ID $product_id is out of stock. No variations created.");
+            return;
+        }
+    
+        // Ensure the attributes exist, if not, create them
+        foreach ($attributes_data as $taxonomy => $options) {
+            if (!taxonomy_exists($taxonomy)) {
+                // Create taxonomy if it doesn't exist
+                $this->create_attribute_taxonomy($taxonomy);
             }
+    
+            // Check if the terms exist for the attribute, if not, create them
+            foreach ($options as $option) {
+                $option = trim($option); // Trim whitespace
+                if (!empty($option) && !term_exists($option, $taxonomy)) {
+                    // Create the term if it doesn't exist
+                    $result = wp_insert_term($option, $taxonomy);
+                } 
+            }
+            
         }
-    }
- 
-    $combinations = $this->get_attribute_combinations($attributes_data);
- 
-    foreach ($combinations as $combination) {
-        $variation_exists = false;
-        foreach ($product->get_children() as $variation_id) { // Iterate through children directly
-            $existing_variation = wc_get_product($variation_id);
-            $attributes_match = true;
- 
-            foreach ($combination as $taxonomy => $term_name) {
-                if (get_post_meta($variation_id, 'attribute_' . $taxonomy, true) !== $term_name) {
-                    $attributes_match = false;
+    
+        // Proceed with creating the variations
+        $combinations = $this->get_attribute_combinations($attributes_data);
+        $num_variations = count($combinations);
+    
+        $index = 0;
+    
+        foreach ($combinations as $combination) {
+    
+            // Check for existing variations to avoid duplicates
+            $existing_variations = $product->get_children();
+            $variation_exists = false;
+    
+            foreach ($existing_variations as $variation_id) {
+                $existing_variation = wc_get_product($variation_id);
+                $attributes_match = true;
+    
+                foreach ($combination as $taxonomy => $term_name) {
+                    $existing_value = get_post_meta($variation_id, 'attribute_' . $taxonomy, true);
+                    if ($existing_value !== $term_name) {
+                        $attributes_match = false;
+                        break;
+                    }
+                }
+    
+                if ($attributes_match) {
+                    error_log("Variation already exists for combination: " . implode(', ', $combination));
+                    $variation_exists = true;
                     break;
                 }
             }
- 
-            if ($attributes_match) {
-                error_log("Variation already exists for combination: " . implode(', ', $combination));
-                $variation_exists = true;
-                break;
+    
+            if ($variation_exists) {
+                continue; // Skip creating duplicate variations
             }
-        }
- 
-        if ($variation_exists) {
-            continue;
-        }
- 
-        $variation_id = wp_insert_post([
-            'post_title' => $product->get_name() . ' - ' . implode(', ', $combination),
-            'post_name' => 'product-' . $product_id . '-variation-' . sanitize_title(implode('-', $combination)),
-            'post_status' => 'publish',
-            'post_parent' => $product_id,
-            'post_type' => 'product_variation',
-        ]);
- 
-        foreach ($combination as $taxonomy => $term_name) {
-            update_post_meta($variation_id, 'attribute_' . $taxonomy, $term_name);
-        }
- 
-        $custom_price_multiplier = 1;
-        foreach ($combination as $taxonomy => $term_name) {
-            if ($term = get_term_by('name', $term_name, $taxonomy)) {
-                if ($quantity = get_term_meta($term->term_id, 'quantity', true)) {
-                    $custom_price_multiplier *= (float)$quantity;
+    
+            $variation_data = [
+                'post_title' => $product->get_name() . ' - ' . implode(', ', $combination),
+                'post_name' => 'product-' . $product_id . '-variation-' . sanitize_title(implode('-', $combination)),
+                'post_status' => 'publish',
+                'post_parent' => $product_id,
+                'post_type' => 'product_variation',
+            ];
+    
+            // Create the variation post
+            $variation_id = wp_insert_post($variation_data);
+    
+            // Set variation attributes
+            foreach ($attributes_data as $taxonomy => $options) {
+                $variation_attribute = $taxonomy;
+                $value = $combination[$taxonomy];
+                update_post_meta($variation_id, 'attribute_' . $variation_attribute, $value);
+            }
+    
+            $custom_price_multiplier = 1;
+    
+            // Loop through the combination to calculate the custom price multiplier
+            foreach ($combination as $taxonomy => $term_name) {
+                $term = get_term_by('name', $term_name, $taxonomy);
+                if ($term) {  
+                    // Get the quantity from the term metadata
+                    $quantity = get_term_meta($term->term_id, 'quantity', true);
+                    if ($quantity) {
+                        error_log("Custom Field Value for term {$term_name}: " . var_export($quantity, true));
+                        $custom_price_multiplier *= floatval($quantity); // Convert to numeric
+                    }
                 }
             }
+    
+            // Ensure product price is numeric
+            $product_price = floatval($product->get_price());
+            $variation_price = $product_price * $custom_price_multiplier;
+    
+            // Set variation price
+            update_post_meta($variation_id, '_regular_price', $variation_price);
+            update_post_meta($variation_id, '_price', $variation_price);
+    
+            // Update stock only if the product is in stock
+            if ($product->get_stock_quantity() > 0) {
+                // Get the stock quantity from the term's metadata
+                $variation_stock = get_term_meta($term->term_id, 'quantity', true);
+                if ($variation_stock) {
+                    // Set the stock for the variation using the term's quantity value
+                    update_post_meta($variation_id, '_stock', intval($variation_stock)); // Use the term's quantity for stock
+                    error_log("Variation Stock for {$term->name}: " . $variation_stock); // Log stock value for debugging
+                } else {
+                    update_post_meta($variation_id, '_stock', 0); // If no quantity found, set stock to 10
+                }
+    
+                update_post_meta($variation_id, '_stock_status', 'instock');
+                update_post_meta($variation_id, '_manage_stock', 'no');
+            } else {
+                update_post_meta($variation_id, '_stock_status', 'outofstock');
+                update_post_meta($variation_id, '_manage_stock', 'no');
+                update_post_meta($variation_id, '_stock', 0); // No stock for variations
+            }
+    
+            // Set the default variation (first variation)
+            if ($index === 0) {
+                update_post_meta($product_id, '_default_attributes', [
+                    $taxonomy => $combination[$taxonomy],
+                ]);
+            }
+    
+            $index++;
         }
- 
-        $variation_price = (float)$product->get_price() * $custom_price_multiplier;
-        update_post_meta($variation_id, '_regular_price', $variation_price);
-        update_post_meta($variation_id, '_price', $variation_price);
- 
-        $variation_stock = get_term_meta(get_term_by('name', $term_name, $taxonomy)->term_id, 'quantity', true); // Simplified stock lookup
-        $stock_status = $product->get_stock_quantity() > 0 ? 'instock' : 'outofstock';
-        update_post_meta($variation_id, '_stock_status', $stock_status);
-        update_post_meta($variation_id, '_manage_stock', 'no');
-        update_post_meta($variation_id, '_stock', $stock_status === 'instock' ? ($variation_stock ? (int)$variation_stock : 0) : 0);
- 
-        if ($index === 0) {
-            update_post_meta($product_id, '_default_attributes', $combination);
-        }
- 
-        $index++;
+    
+        // Log success
+        error_log("Variations successfully generated for product ID: $product_id");
     }
- 
-    error_log("Variations successfully generated for product ID: $product_id");
-}
+    
     /**
      * Generate all possible combinations of attributes.
      *
@@ -265,22 +411,22 @@ private function generate_product_variations($product_id, $attributes_data) {
     private function get_attribute_combinations($attributes_data)
     {
     $combinations = [[]]; // Start with an empty combination
- 
+
     foreach ($attributes_data as $attribute => $terms) {
         $new_combinations = [];
- 
+
         foreach ($combinations as $combination) {
             foreach ($terms as $term) {
                 $new_combinations[] = array_merge($combination, [$attribute => $term]);
             }
         }
- 
+
         $combinations = $new_combinations;
     }
- 
+
     return $combinations;
     }
- 
+
     /**
      * Create attribute taxonomy if it doesn't exist
      */
@@ -295,11 +441,11 @@ private function generate_product_variations($product_id, $attributes_data) {
             'query_var' => true,
             'rewrite' => array('slug' => $taxonomy),
         );
-   
+    
         register_taxonomy($taxonomy, 'product', $args);
     }
-   
- 
+    
+
     /**
      * Save custom fields dynamically.
      *
@@ -321,10 +467,10 @@ private function generate_product_variations($product_id, $attributes_data) {
                 $wc_product->update_meta_data($meta_key, $product[$field_name]);
             }
         }
- 
+
         $wc_product->update_meta_data('flourish_item_id', $product['flourish_item_id']);
     }
- 
+
     /**
      * Assign a category to the WooCommerce product.
      *
@@ -332,34 +478,22 @@ private function generate_product_variations($product_id, $attributes_data) {
      * @param int $product_id The WooCommerce product ID.
      * @throws \Exception If there is an error inserting the category term.
      */
-    private function assign_product_category($category_name, $product_id) {
-        if (empty($category_name)) {
-            error_log("Category name is empty. Skipping category assignment.");
-            return;
-        }
-   
-        // Check if the term already exists
+    private function assign_product_category($category_name, $product_id)
+    {
         $term = term_exists($category_name, 'product_cat');
+
         if (!$term) {
-            // Create the term if it doesn't exist
             $term = wp_insert_term($category_name, 'product_cat');
-            if (is_wp_error($term)) {
-                error_log("Error inserting category: " . $term->get_error_message());
-                return;
-            }
         }
-   
-        // Extract term ID correctly
-        $term_id = is_array($term) ? $term['term_id'] : $term;
-        if ($term_id) {
-            wp_set_object_terms($product_id, (int) $term_id, 'product_cat');
-            error_log("Category assigned successfully: " . $category_name . " (ID: $term_id) to Product ID: $product_id");
+
+        if (!is_wp_error($term)) {
+            $term_id = $term['term_id'] ?? $term['term_taxonomy_id'];
+            wp_set_object_terms($product_id, (int)$term_id, 'product_cat');
         } else {
-            error_log("Failed to retrieve term ID for category: " . $category_name);
+            throw new \Exception("Error inserting category term.");
         }
     }
-   
- 
+
     /**
      * Map a single Flourish item to a WooCommerce product.
      *
@@ -384,3 +518,6 @@ private function generate_product_variations($product_id, $attributes_data) {
         ];
     }
 }
+
+
+

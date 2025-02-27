@@ -30,6 +30,29 @@ class SettingsPage
                     add_filter('woocommerce_email_classes', [$this, 'register_draft_order_email']);
                 //}
             });
+            add_action('wp_enqueue_scripts', function($hook) {
+                // Enqueue custom styles (for front-end)
+                wp_enqueue_style(
+                    'save-cart-style',  // Make sure you are using a unique handle
+                    plugin_dir_url(dirname(__FILE__)) . 'assets/css/save-cart-style.css', 
+                    [], // No dependencies
+                    '1.0.0', // Version
+                    'all' // Media type
+                );
+                wp_enqueue_script(
+                    'flourish-cart-js',  
+                    plugin_dir_url(dirname(__FILE__)) . 'assets/js/flourish-cart.js', 
+                    ['jquery'], 
+                    '1.0.0', 
+                     true
+                );
+                // In PHP (add nonce to localize script)
+                wp_localize_script('flourish-cart-js', 'stockAvailability', [
+                    'ajax_url' => admin_url('admin-ajax.php'),
+                    'nonce' => wp_create_nonce('flourish_cart_nonce')
+                ]);
+               
+            });
         }
         
         add_filter('plugin_action_links_' . $this->plugin_basename, [$this, 'add_settings_link']);

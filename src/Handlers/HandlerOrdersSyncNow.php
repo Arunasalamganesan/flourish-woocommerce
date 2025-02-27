@@ -25,11 +25,31 @@ class HandlerOrdersSyncNow
         // Hook into the action when an order is moved to the trash from the order edit page
         add_action('wp_trash_post', [$this, 'custom_action_on_trash_order_from_edit_page'], 10, 1);
         // Hook into the WooCommerce order save action
-        add_action('woocommerce_process_shop_order_meta', [$this, 'handle_order_cancel_update'], 10, 3);
-        add_filter('handle_bulk_actions-edit-shop_order', [$this, 'handle_custom_bulk_status_action'], 10, 3);
-        //add_action('woocommerce_order_edit_status', [$this, 'handle_custom_bulk_status_action'], 10, 2);
-        //add_action('woocommerce_order_edit_status',  [$this, 'handle_bulk_action_wc_orders'], 10, 3);
+        // Prevent stock reduction before order items are saved
+        $order_type = isset($this->existing_settings['flourish_order_type']) ? $this->existing_settings['flourish_order_type'] : false;
 
+        if ($order_type !== 'retail') {
+            add_filter( 'woocommerce_prevent_adjust_line_item_product_stock', function( $prevent, $item, $item_quantity ) {
+                $order = wc_get_order( $item->get_order_id() );
+            
+                // Prevent stock reduction for "on-hold" and "processing" order statuses
+                if ( $order && in_array( $order->get_status(), ['on-hold', 'processing'] ) ) { 
+                    return true;
+                }
+            
+                return $prevent;
+            }, 10, 3 );
+            
+            add_filter('woocommerce_can_reduce_order_stock', function ($can_reduce_stock, $order) {
+                if (is_a($order, 'WC_Order') && in_array($order->get_status(), ['draft', 'on-hold'])) {
+                    error_log("Stock reduction disabled for Order ID: " . $order->get_id());
+                    return false;
+                }
+                return $can_reduce_stock;
+            }, 10, 2);
+        }
+        add_action('woocommerce_process_shop_order_meta', [$this, 'handle_order_cancel_update'], 10, 3);    
+        add_filter('handle_bulk_actions-edit-shop_order', [$this, 'handle_custom_bulk_status_action'], 10, 3);
     }
     
     /**
@@ -408,7 +428,11 @@ class HandlerOrdersSyncNow
             if ($selected_status === 'wc-completed') {
                 $sync_outboundorder =  $this->sync_products_with_flourish($post_id, "shipped");
             }
-            
+            if ($selected_status === 'wc-checkout-draft' || $selected_status === 'wc-on-hold') {
+                remove_action('woocommerce_reduce_order_stock', 'wc_maybe_reduce_stock_levels');
+                add_filter('woocommerce_can_reduce_order_stock', '__return_false');
+                return false; // Prevent stock reduction
+            }
         }
     }
     /**

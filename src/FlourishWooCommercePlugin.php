@@ -35,6 +35,7 @@ class FlourishWooCommercePlugin
         // Register services
         $service_provider = new ServiceProvider($existing_settings, $plugin_basename);
         $service_provider->register_services();
+        
 
        // Add our JavaScript
         add_action('admin_enqueue_scripts', function($hook) {
@@ -78,41 +79,23 @@ class FlourishWooCommercePlugin
             }
         });
 
-        add_action('wp_enqueue_scripts', function($hook) {
-            // Enqueue custom styles (for front-end)
-            wp_enqueue_style(
-                'save-cart-style',  // Make sure you are using a unique handle
-                plugin_dir_url(dirname(__FILE__)) . 'assets/css/save-cart-style.css', 
-                [], // No dependencies
-                '1.0.0', // Version
-                'all' // Media type
-            );
-            wp_enqueue_script(
-                'flourish-cart-js',  
-                plugin_dir_url(dirname(__FILE__)) . 'assets/js/flourish-cart.js', 
-                ['jquery'], 
-                '1.0.0', 
-                 true
-            );
-            // In PHP (add nonce to localize script)
-            wp_localize_script('flourish-cart-js', 'stockAvailability', [
-                'ajax_url' => admin_url('admin-ajax.php'),
-                'nonce' => wp_create_nonce('flourish_cart_nonce')
-            ]);
-           
-        });
+       
+
+          
     }
     public function activate()
-    {
-     
+    { 
+         
     }
+
 
     public function deactivate()
     {
-    
+         
     }
 
     public function uninstall()
     {
+        
     }
 }
