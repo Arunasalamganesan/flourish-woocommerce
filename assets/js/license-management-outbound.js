@@ -58,14 +58,14 @@ jQuery(function ($) {
    $('#add-update-license').on('click', function ()
    {
         const newLicense = $('#new_license').val().trim();
-        // Define a regular expression to allow only letters, numbers, dashes (-), and underscores (_)
-        const isValidLicense = /^[a-zA-Z0-9\-_]+$/.test(newLicense);
-       
+        // Define a regular expression to allow letters, numbers, dashes (-), underscores (_), and periods (.)
+        const isValidLicense = /^[a-zA-Z0-9\-_.]+$/.test(newLicense);
+        
         if (!newLicense) {
-        alert('License number cannot be empty.');
+            alert('License number cannot be empty.');
         } else if (!isValidLicense) {
-        alert('License number contains invalid characters. Only letters, numbers, dashes (-), and underscores (_) are allowed.');
-        }  
+            alert('License number contains invalid characters. Only letters, numbers, dashes (-), underscores (_), and periods (.) are allowed.');
+        }
         else
         {
         const data = {
