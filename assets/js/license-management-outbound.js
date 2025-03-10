@@ -84,7 +84,7 @@ jQuery(function ($) {
         const selectedLicense = $('#license').val();  // Get the selected license
         const newLicense = $('#new_license').val().trim();
         // Define a regular expression to allow only letters, numbers, dashes (-), and underscores (_)
-        const isValidLicense = /^[a-zA-Z0-9\-_]+$/.test(newLicense);
+        const isValidLicense = /^[a-zA-Z0-9\-_.]+$/.test(newLicense);
        
         if (!newLicense && !selectedLicense)
          {
@@ -92,7 +92,7 @@ jQuery(function ($) {
         }
         else if (!isValidLicense)
         {
-        alert('License number contains invalid characters. Only letters, numbers, dashes (-), and underscores (_) are allowed.');
+            alert('License number contains invalid characters. Only letters, numbers, dashes (-), underscores (_), and periods (.) are allowed.');
         }
         else
         {
