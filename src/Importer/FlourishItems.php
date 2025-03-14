@@ -186,7 +186,7 @@ class FlourishItems
         $product_id = $wc_product->get_id();
         $reserved_stock = (int) get_post_meta($product_id, '_reserved_stock', true);
         $flourish_stock = $product['inventory_quantity'];
-        $woocommerce_stock = $flourish_stock - $reserved_stock;
+        $woocommerce_stock = abs($flourish_stock - $reserved_stock);
         $wc_product->set_stock_quantity($woocommerce_stock); 
         // Save the product and get its ID
         $product_id = $wc_product->save(); // Persist changes to the database. 
@@ -324,6 +324,27 @@ class FlourishItems
             }
     
             if ($variation_exists) {
+                $custom_price_multiplier = 1;
+                // Loop through the combination to calculate the custom price multiplier
+                foreach ($combination as $taxonomy => $term_name) {
+                    $term = get_term_by('name', $term_name, $taxonomy);
+                    if ($term) {  
+                        // Get the quantity from the term metadata
+                        $quantity = get_term_meta($term->term_id, 'quantity', true);
+                        if ($quantity) {
+                            error_log("Custom Field Value for term {$term_name}: " . var_export($quantity, true));
+                            $custom_price_multiplier *= floatval($quantity); // Convert to numeric
+                        }
+                    }
+                }
+        
+                // Ensure product price is numeric
+                $product_price = floatval($product->get_price());
+                $variation_price = $product_price * $custom_price_multiplier;
+        
+                // Set variation price
+                update_post_meta($variation_id, '_regular_price', $variation_price);
+                update_post_meta($variation_id, '_price', $variation_price);
                 continue; // Skip creating duplicate variations
             }
     

@@ -24,23 +24,27 @@ class ProductCustomFields
     public function add_custom_fields_inventory()
     {
         global $post;
-        // Retrieve the held stock value
-        $hold_stock = get_post_meta($post->ID, '_held_stock', true) ?: 0;
-        // Add the field in the Inventory tab
+
+        $fields = [
+            '_held_stock' => __('Held Stock', 'woocommerce'),
+            '_reserved_stock' => __('Reserved Stock', 'woocommerce')
+        ];
+
         echo '<div class="options_group">';
-        woocommerce_wp_text_input([
-            'id' => '_held_stock',
-            'label' => __('Held Stock', 'woocommerce'),
-            'description' => __('Display units hold in stock for Cart Items.', 'woocommerce'),
-            'type' => 'number',
-            'value' => $hold_stock,
-            'desc_tip' => true,
-            'custom_attributes' => [
-                'readonly' => 'readonly', // This makes the field non-editable
-            ],
-        ]);
+        foreach ($fields as $id => $label) {
+            woocommerce_wp_text_input([
+                'id' => $id,
+                'label' => $label,
+                'description' => sprintf(__('Display units %s in stock.', 'woocommerce'), strtolower($label)),
+                'type' => 'number',
+                'value' => get_post_meta($post->ID, $id, true) ?: 0,
+                'desc_tip' => true,
+                'custom_attributes' => ['readonly' => 'readonly']
+            ]);
+        }
         echo '</div>';
     }
+
 
     public function add_custom_fields()
     {

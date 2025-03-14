@@ -6,7 +6,7 @@ defined( 'ABSPATH' ) || exit;
 
 use FlourishWooCommercePlugin\API\FlourishAPI;
 use FlourishWooCommercePlugin\Importer\FlourishItems;
-
+use FlourishWooCommercePlugin\Helpers\HttpRequestHelper;
 
 class SettingsPage
 {
@@ -22,7 +22,9 @@ class SettingsPage
     public function register_hooks()
     {
         $order_type = isset($this->existing_settings['flourish_order_type']) ? $this->existing_settings['flourish_order_type'] : false;
- 
+        add_action('add_meta_boxes', [$this, 'add_refresh_inventory_button_meta_box']);
+        add_action('wp_ajax_fetch_inventory', [$this, 'fetch_inventory_callback']);
+        add_action('wp_ajax_nopriv_fetch_inventory', [$this, 'fetch_inventory_callback']); // Non-logged-in users
         if ($order_type !== 'retail') // check flourish order type
         { 
             add_action('plugins_loaded', function () {
@@ -93,7 +95,134 @@ class SettingsPage
         add_action('wp_ajax_get_uom_dropdown_html_handler', [$this, 'get_uom_dropdown_html_handler']);
     
     }
+    function add_refresh_inventory_button_meta_box() {
+        add_meta_box(
+            'refresh_inventory_meta_box', // Unique ID for the meta box
+            'Refresh Inventory', // Title of the meta box
+            [$this, 'refresh_inventory_button_callback'], 
+            'product', // Post type (WooCommerce Product)
+            'side', // Display location (side panel)
+            'high' // Priority
+        );
+    }
     
+    // Callback function to display the button
+    function refresh_inventory_button_callback($post) {
+        // Ensure the function is accessible
+        if (!isset($post->post_status)) {
+            echo '<p>Error: Invalid product data.</p>';
+            return;
+        }
+
+        $product_id = $post->ID;
+        ?>
+        <button id="refresh-inventory-btn" data-product-id="<?php echo esc_attr($product_id); ?>" class="button button-primary">
+            Refresh Inventory
+        </button>
+        <p id="inventory-message" style="margin-top: 10px; color: green;"></p> 
+        <script type="text/javascript">
+            jQuery(document).ready(function($) {
+                $('#refresh-inventory-btn').on('click', function(event) {
+                    //event.preventDefault(); // Prevent default form action
+                    var productId = $(this).data('product-id');
+                    console.log("Product ID:", productId); // Debugging
+
+                    $.ajax({
+                        url: ajaxurl,
+                        type: 'POST',
+                        data: {
+                            action: 'fetch_inventory',
+                            product_id: productId
+                        },
+                        success: function(response) {
+                            if (response.success && response.data && response.data.message) {
+                                $('#inventory-message').text(response.data.message).css("color", "green"); 
+                            } else {
+                                $('#inventory-message').text("Inventory updated, but no message found.").css("color", "orange");
+                            }
+                        },
+                        error: function() {
+                            $('#inventory-message').text("Error updating inventory.").css("color", "red"); 
+                        }
+                    });
+                });
+            });
+        </script>
+        <?php
+    }
+    function fetch_inventory_callback() {
+        error_log("POST Data: " . print_r($_POST, true)); // Log all POST data
+
+        if (!isset($_POST['product_id'])) {
+            wp_send_json_error(['message' => 'Invalid product ID']);
+        }
+        $product_id = sanitize_text_field($_POST['product_id']);
+        $product = wc_get_product($product_id);
+
+        if ($product) {
+            // Retrieve Flourish item ID from the parent product
+            $item_id = $product->get_meta('flourish_item_id');
+        }
+        $flourish_api = new FlourishAPI(
+            $this->existing_settings['username'] ?? '',
+            $this->existing_settings['api_key'] ?? '',
+            $this->existing_settings['url'] ?? '',
+            $this->existing_settings['facility_id'] ?? ''
+        );
+        $url = $flourish_api->url;
+        $api_url = $url . "/external/api/v1/items?item_id={$item_id}";
+        $auth_header = $flourish_api->auth_header;
+        $headers = ['Authorization: Basic ' .  $auth_header ?? ''];
+
+        try {
+            // Make API request
+            $response_http = HttpRequestHelper::make_request($api_url, 'GET', $headers);
+            $response_data = HttpRequestHelper::validate_response($response_http);
+        } catch (\Exception $e) {
+            error_log("Error fetching product (API call): " . $e->getMessage());
+            return false;
+        }
+
+        if (!isset($response_data['data'][0])) {
+            error_log("API returned empty data for item ID: " . $item_id);
+            return false;
+        }
+
+        // Extract product data
+        $data = $response_data['data'][0];
+        $inventory_records = $flourish_api->fetch_inventory($data['id']);
+        
+        $inventory_quantity = 0;
+
+        // Match inventory record with the item's SKU
+        foreach ($inventory_records as $inventory) {
+            if ($inventory['sku'] === $data['sku']) {
+                $inventory_quantity = $inventory['sellable_qty'];
+                break;
+            }
+        }
+
+        // Save item data including inventory quantity
+        $data['inventory_quantity'] = $inventory_quantity;
+        $items = [$data];
+        $item_sync_options = $this->existing_settings['item_sync_options'] ?? [];
+        
+        $reserved_stock = (int) get_post_meta($product_id, '_reserved_stock', true);
+        $woocommerce_stock = abs($inventory_quantity - $reserved_stock);
+        $product->set_stock_quantity($woocommerce_stock); 
+        $product->save();
+        $flourish_items = new FlourishItems($items);
+        
+        $flourish_items->save_as_woocommerce_products($item_sync_options);
+
+
+        if (is_wp_error($response)) {
+            wp_send_json_error(['message' => 'Error fetching inventory']);
+        }
+    
+        //$body = wp_remote_retrieve_body($response);
+        wp_send_json_success(['message' => 'Inventory refreshed']);
+    }
     //enqueue the style css page
     function flourish_woocommerce_plugin_enqueue_styles($hook_suffix) {
         // Check if we are on the correct settings page

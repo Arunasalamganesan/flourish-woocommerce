@@ -493,7 +493,7 @@ class HandlerOrdersSyncNow
             else
             {
                 //when order is cancelled reversed stock will decrease
-                $reversed_stock_increase = $reserved_stock - $add_qty;
+                $reversed_stock_increase = abs($reserved_stock - $add_qty);
                 update_post_meta($product_id, '_reserved_stock', $reversed_stock_increase); 
 
             }

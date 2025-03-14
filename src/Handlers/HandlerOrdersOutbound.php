@@ -216,7 +216,7 @@ class HandlerOrdersOutbound
                 {
                     $line_item_reserved_stock = (int) get_post_meta($line_item_id, '_reserved_stock', true);
                     $product_reserved_stock = (int) get_post_meta($product_id, '_reserved_stock', true);
-                    $updated_product_reserved_stock = $product_reserved_stock - $line_item_reserved_stock;
+                    $updated_product_reserved_stock = abs($product_reserved_stock - $line_item_reserved_stock);
                     update_post_meta($product_id, '_reserved_stock', $updated_product_reserved_stock);  
                 }
                 
