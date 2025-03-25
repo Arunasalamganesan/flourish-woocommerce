@@ -28,9 +28,11 @@ class SettingsPage
         if ($order_type !== 'retail') // check flourish order type
         { 
             add_action('plugins_loaded', function () {
-                //if (class_exists('WC_Email')) {
-                    add_filter('woocommerce_email_classes', [$this, 'register_draft_order_email']);
-                //}
+                //To completely disable woocommerce_cleanup_draft_orders in WooCommerce
+                add_action('init', [$this,  'disable_woocommerce_cleanup_draft_orders'], 20);
+                //Draft Orders Email class in WooCommerce
+                add_filter('woocommerce_email_classes', [$this, 'register_draft_order_email']);
+                 
             });
             add_action('wp_enqueue_scripts', function($hook) {
                 // Enqueue custom styles (for front-end)
@@ -1173,6 +1175,24 @@ class SettingsPage
         $uom_options = $this->display_uom_dropdown(); // Fetch UOM options
         // Return success response
         wp_send_json_success(['html' => $uom_options]);
+    }
+    public function disable_woocommerce_cleanup_draft_orders() {
+	
+
+        if (!class_exists('WooCommerce')) {
+            return;
+        }
+    
+        if (class_exists('ActionScheduler')) {
+           as_unschedule_all_actions('woocommerce_cleanup_draft_orders');
+            as_unschedule_action('woocommerce_cleanup_draft_orders');
+        }
+        add_filter('woocommerce_cleanup_draft_orders', '__return_false');
+        // Remove the action that schedules the cleanup task
+        remove_action('woocommerce_init', 'wc_schedule_cleanup_draft_orders');
+        // Remove the cleanup action itself
+        remove_action('woocommerce_cleanup_draft_orders', [$this, 'delete_expired_draft_orders']);
+         
     }
     public function register_draft_order_email($emails)
     {
