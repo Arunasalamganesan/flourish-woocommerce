@@ -100,6 +100,7 @@ class HandlerOutboundUpdateCart
     public function customize_single_product_page() {
 
         global $product;
+        $stock_display_format = get_option('woocommerce_stock_format', 'always');
         // Logic for handling variable products
         if ($product->is_type('variable')) {
             ?>
@@ -122,19 +123,30 @@ class HandlerOutboundUpdateCart
                                 if (response.success) {
                                     var maxQty = response.data.maxQty;
                                     var stockMessage = response.data.stockMessage;
-                                    var stockQty = response.data.stock_quantity + ' in stock';
-    
+                                    var stockQty = response.data.stock_quantity;
+                                    // Get stock display format from PHP
+                                    var stockDisplayFormat = "<?php echo esc_js($stock_display_format); ?>";
+									//console.log(stockDisplayFormat,"stockdisplayformat");
                                     $quantityInput.attr('max', maxQty);
                                     $quantityInput.val(1);
     
                                     $('.woocommerce-variation-availability p.stock').not(':first').remove();
                                     var $stockMessageContainer = $('.woocommerce-variation-availability p.stock:first');
-                                    if ($stockMessageContainer.length) {
-                                        $stockMessageContainer.text(stockQty).show();
-                                    } else {
-                                        $('.woocommerce-variation-add-to-cart').before(stockQty);
-                                    }
-                                    $('.woocommerce-variation-availability p.stock').slice(1).hide();
+									var displayStockMessage = "";
+                                if (stockDisplayFormat === "always" || stockDisplayFormat === "" ) {
+                                    displayStockMessage = stockQty + ' in stock';
+                                } else if (stockDisplayFormat === "low_amount" && stockQty <= 12) {
+                                    displayStockMessage = 'Only ' + stockQty + ' left in stock!';
+                                } else if (stockDisplayFormat === "no_amount") {
+                                    displayStockMessage = 'In stock';
+                                }
+
+                                if ($stockMessageContainer.length) {
+                                    $stockMessageContainer.text(displayStockMessage).show();
+                                } else {
+                                    $('.woocommerce-variation-add-to-cart').before('<p class="stock">' + displayStockMessage + '</p>');
+                                }
+                                $('.woocommerce-variation-availability p.stock').slice(1).hide();
                                 } else {
                                     console.error(response.data.message);
                                 }
@@ -163,12 +175,26 @@ class HandlerOutboundUpdateCart
                         success: function (response) {
                             if (response.success) {
                                 var maxQty = response.data.maxQty;
-                                var stockMessage = response.data.stockMessage;
-                                $quantityInput.attr('max', maxQty);
-                                $quantityInput.val(1);
-                                $('#custom-stock-message').remove();
-                                $('form.cart').before('<p id="custom-stock-message" class="custom-stock-message">' + stockMessage + '</p>');
-                                $('.stock.in-stock:first').hide();
+								var stockMessage = response.data.stockMessage;
+								var stockDisplayFormat = '<?php echo get_option("woocommerce_stock_format"); ?>'; // Get stock display format
+								console.log(stockDisplayFormat,"stockDisplayFormat");
+								var displayStockMessage = stockMessage; // Default message
+
+								// Handle different stock display formats
+								if (stockDisplayFormat === "no_amount") {
+									displayStockMessage = "In stock"; // Hide quantity, only show "In stock"
+								} else if (stockDisplayFormat === "low_amount" && maxQty <= 5) {
+									displayStockMessage = "Hurry, only " + maxQty + " left!";
+								} else if (stockDisplayFormat === "always" || stockDisplayFormat === "") {
+									displayStockMessage = stockMessage; // Show full stock quantity message
+								}
+
+								// Update quantity input and stock message
+								$quantityInput.attr('max', maxQty);
+								$quantityInput.val(1);
+								$('#custom-stock-message').remove();
+								$('form.cart').before('<p id="custom-stock-message" class="custom-stock-message">' + displayStockMessage + '</p>');
+								$('.stock.in-stock:first').hide();
                             } else {
                                 console.error(response.data.message);
                             }
