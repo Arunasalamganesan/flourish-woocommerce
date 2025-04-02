@@ -272,7 +272,7 @@ class HandlerOrdersCancel
                         
                         $wc_product = wc_get_product($product_id);
                         $reserved_stock = (int) get_post_meta($product_id, '_reserved_stock', true);
-                        $reserved_with_sellable = $sellable_quantity - $reserved_stock;
+                        $reserved_with_sellable = abs($sellable_quantity - $reserved_stock);
                         if ($wc_product) {
                             // Update stock and clear cache
                             $wc_product->set_manage_stock(true);

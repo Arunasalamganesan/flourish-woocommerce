@@ -26,23 +26,29 @@ class ProductCustomFields
         global $post;
 
         $fields = [
-            '_held_stock' => __('Held Stock', 'woocommerce'),
-            '_reserved_stock' => __('Reserved Stock', 'woocommerce')
+            '_held_stock' => [
+                'label' => __('Held Stock', 'woocommerce'),
+                'description' => __('Stock temporarily set aside when a customer adds a product to their cart.', 'woocommerce')
+            ],
+            '_reserved_stock' => [
+                'label' => __('Reserved Stock', 'woocommerce'),
+                'description' => __('Stock allocated for confirmed orders but not yet fulfilled.', 'woocommerce')
+            ]
         ];
-
+        
         echo '<div class="options_group">';
-        foreach ($fields as $id => $label) {
+        foreach ($fields as $id => $field) {
             woocommerce_wp_text_input([
                 'id' => $id,
-                'label' => $label,
-                'description' => sprintf(__('Display units %s in stock.', 'woocommerce'), strtolower($label)),
+                'label' => $field['label'],
+                'description' => $field['description'],
                 'type' => 'number',
                 'value' => get_post_meta($post->ID, $id, true) ?: 0,
                 'desc_tip' => true,
                 'custom_attributes' => ['readonly' => 'readonly']
             ]);
         }
-        echo '</div>';
+        echo '</div>'; 
     }
 
 

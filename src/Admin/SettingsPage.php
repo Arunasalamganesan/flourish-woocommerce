@@ -28,24 +28,34 @@ class SettingsPage
         if ($order_type !== 'retail') // check flourish order type
         { 
             add_action('plugins_loaded', function () {
-                //To completely disable woocommerce_cleanup_draft_orders in WooCommerce
-                add_action('init', [$this,  'disable_woocommerce_cleanup_draft_orders'], 20);
-                //Draft Orders Email class in WooCommerce
+                 //Draft Orders Email class in WooCommerce
                 add_filter('woocommerce_email_classes', [$this, 'register_draft_order_email']);
                  
             });
+            //To completely disable woocommerce_cleanup_draft_orders in WooCommerce
+            add_action('init', function() {
+                $timestamp = wp_next_scheduled('woocommerce_cleanup_draft_orders');
+                if ($timestamp) {
+                    wp_unschedule_event($timestamp, 'woocommerce_cleanup_draft_orders');
+                }
+                remove_action('woocommerce_cleanup_draft_orders', 'wc_cleanup_draft_orders');
+                remove_action( 'wp_scheduled_auto_draft_delete', 'wp_delete_auto_drafts' );
+                add_action( 'before_delete_post',[$this, 'prevent_draft_order_deletion'], 10, 2 );
+                // Disable re-scheduling by blocking the function call
+                add_filter('woocommerce_cleanup_draft_orders_interval', '__return_zero');
+            });  
             add_action('wp_enqueue_scripts', function($hook) {
                 // Enqueue custom styles (for front-end)
                 wp_enqueue_style(
                     'save-cart-style',  // Make sure you are using a unique handle
-                    plugin_dir_url(dirname(__FILE__)) . 'assets/css/save-cart-style.css', 
+                    plugin_dir_url(dirname(dirname(__FILE__))) . 'assets/css/save-cart-style.css', 
                     [], // No dependencies
                     '1.0.0', // Version
                     'all' // Media type
                 );
                 wp_enqueue_script(
                     'flourish-cart-js',  
-                    plugin_dir_url(dirname(__FILE__)) . 'assets/js/flourish-cart.js', 
+                    plugin_dir_url(dirname(dirname(__FILE__))) . 'assets/js/flourish-cart.js', 
                     ['jquery'], 
                     '1.0.0', 
                      true
@@ -96,6 +106,11 @@ class SettingsPage
         // Handle the AJAX request to edit the case size and retrieve the available Unit of Measurement (UOM) options.
         add_action('wp_ajax_get_uom_dropdown_html_handler', [$this, 'get_uom_dropdown_html_handler']);
     
+    }
+    public function prevent_draft_order_deletion($post_id, $post) {
+        if (($post->post_type === 'shop_order' && $post->post_status === 'draft') || ($post->post_type === 'shop_order' && $post->post_status === 'wc-checkout-draft') || ($post->post_type === 'shop_order' && $post->post_status === 'auto-raft')){
+            wp_die(__('Draft orders cannot be deleted.', 'your-textdomain'));
+        }
     }
     function add_refresh_inventory_button_meta_box() {
         add_meta_box(
@@ -218,7 +233,7 @@ class SettingsPage
         $flourish_items->save_as_woocommerce_products($item_sync_options);
 
 
-        if (is_wp_error($response)) {
+        if (is_wp_error($data)) {
             wp_send_json_error(['message' => 'Error fetching inventory']);
         }
     
@@ -1176,24 +1191,7 @@ class SettingsPage
         // Return success response
         wp_send_json_success(['html' => $uom_options]);
     }
-    public function disable_woocommerce_cleanup_draft_orders() {
-	
-
-        if (!class_exists('WooCommerce')) {
-            return;
-        }
-    
-        if (class_exists('ActionScheduler')) {
-           as_unschedule_all_actions('woocommerce_cleanup_draft_orders');
-            as_unschedule_action('woocommerce_cleanup_draft_orders');
-        }
-        add_filter('woocommerce_cleanup_draft_orders', '__return_false');
-        // Remove the action that schedules the cleanup task
-        remove_action('woocommerce_init', 'wc_schedule_cleanup_draft_orders');
-        // Remove the cleanup action itself
-        remove_action('woocommerce_cleanup_draft_orders', [$this, 'delete_expired_draft_orders']);
-         
-    }
+     
     public function register_draft_order_email($emails)
     {
          
