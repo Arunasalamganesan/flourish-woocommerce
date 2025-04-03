@@ -165,7 +165,9 @@ class FlourishItems
             $wc_product->set_name($product['name']);
         }
 
-        if (empty($item_sync_options['description']) || $item_sync_options['description']) {
+        // Only set description if the product doesn't already have one
+        $current_description = $wc_product->get_description();
+        if (empty($current_description) && (!isset($item_sync_options['description']) || $item_sync_options['description'] === true)) {
             $wc_product->set_description($product['description']);
         }
 

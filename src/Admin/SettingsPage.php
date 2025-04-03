@@ -43,6 +43,16 @@ class SettingsPage
                 add_action( 'before_delete_post',[$this, 'prevent_draft_order_deletion'], 10, 2 );
                 // Disable re-scheduling by blocking the function call
                 add_filter('woocommerce_cleanup_draft_orders_interval', '__return_zero');
+                add_filter('woocommerce_delete_order_items', function($delete, $order_id) {
+                    $order = wc_get_order($order_id);
+                    if ($order && $order->get_status() === 'wc-checkout-draft' || $order && $order->get_status() === 'auto-draft' ) {
+                        return false; // Prevent deletion of order items for draft orders
+                    }
+                    return $delete;
+                }, 10, 2);
+                
+                
+                
             });  
             add_action('wp_enqueue_scripts', function($hook) {
                 // Enqueue custom styles (for front-end)
@@ -108,10 +118,10 @@ class SettingsPage
     
     }
     public function prevent_draft_order_deletion($post_id, $post) {
-        if (($post->post_type === 'shop_order' && $post->post_status === 'draft') || ($post->post_type === 'shop_order' && $post->post_status === 'wc-checkout-draft') || ($post->post_type === 'shop_order' && $post->post_status === 'auto-raft')){
-            wp_die(__('Draft orders cannot be deleted.', 'your-textdomain'));
-        }
-    }
+        if (($post->post_type === 'shop_order' && get_post_status($post_id) === 'draft') || ($post->post_type === 'shop_order' && get_post_status($post_id) === 'wc-checkout-draft') || ($post->post_type === 'shop_order' && get_post_status($post_id) === 'auto-raft')){
+               wp_die(__('Draft orders cannot be deleted.', 'your-textdomain'));
+           }
+       }
     function add_refresh_inventory_button_meta_box() {
         add_meta_box(
             'refresh_inventory_meta_box', // Unique ID for the meta box
