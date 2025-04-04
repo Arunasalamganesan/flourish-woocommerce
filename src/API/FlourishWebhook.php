@@ -300,7 +300,12 @@ class FlourishWebhook
         //$woocommerce_stock = $flourish_stock + $held_stock;
         $reserved_stock = (int) get_post_meta($product_id, '_reserved_stock', true);
         $flourish_stock = $data['sellable_qty'];
-        $woocommerce_stock = abs($flourish_stock - $reserved_stock);
+        if ($flourish_stock >= 0) {
+            $woocommerce_stock = $flourish_stock - $reserved_stock;
+        } else {
+            // Skip calculation or set a default value
+            $woocommerce_stock = 0; // or null if you want to ignore
+        }
         $wc_product->set_stock_quantity($woocommerce_stock); 
         
         //$wc_product->set_stock_quantity($data['sellable_qty']);
@@ -391,7 +396,12 @@ class FlourishWebhook
                         $sellable_quantity = $items['sellable_qty'];
                         $wc_product = wc_get_product($product_id);
                         $reserved_stock = (int) get_post_meta($product_id, '_reserved_stock', true);
-                        $reserved_with_sellable = abs($sellable_quantity - $reserved_stock);
+                        if ($sellable_quantity >= 0) {
+                            $reserved_with_sellable = $sellable_quantity - $reserved_stock;
+                        } else {
+                            // Skip calculation or set a default value
+                            $reserved_with_sellable = 0; // or null if you want to ignore
+                        }  
                         if ($wc_product) {
                             // Update stock and clear cache
                             $wc_product->set_manage_stock(true);

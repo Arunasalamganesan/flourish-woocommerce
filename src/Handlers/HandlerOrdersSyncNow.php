@@ -245,7 +245,12 @@ class HandlerOrdersSyncNow
                         $sellable_quantity = $items['sellable_qty'];
                         $wc_product = wc_get_product($product_id);
                         $reserved_stock = (int) get_post_meta($product_id, '_reserved_stock', true);
-                        $reserved_with_sellable = $sellable_quantity - $reserved_stock;
+                        if ($sellable_quantity >= 0) {
+                            $reserved_with_sellable = $sellable_quantity - $reserved_stock;
+                        } else {
+                            // Skip calculation or set a default value
+                            $reserved_with_sellable = 0; // or null if you want to ignore
+                        }  
                         if ($wc_product) {
                             // Update stock and clear cache
                             $wc_product->set_manage_stock(true);
@@ -464,7 +469,13 @@ class HandlerOrdersSyncNow
                         $case_quantity = get_term_meta($term->term_id, 'quantity', true) ?: 1; // Default to 1 if not set
                         $reserved_stock = (int) get_post_meta($product_id, '_reserved_stock', true);
                         // Calculate new stock based on the action
-                        $current_stock = $product->get_stock_quantity();
+                        $woo_current_stock = $product->get_stock_quantity();
+                        if ($woo_current_stock >= 0) {
+                            $current_stock = $woo_current_stock;
+                        } else {
+                            // Skip calculation or set a default value
+                            $current_stock = 0; // or null if you want to ignore
+                        }
                         $adjustment = ($action === 'increase') ? $case_quantity : -$case_quantity;
                         $add_qty = $adjustment * $item->get_quantity();
                         $new_stock = max(0, $current_stock + ($adjustment * $item->get_quantity()));
@@ -478,7 +489,13 @@ class HandlerOrdersSyncNow
                 $adjustment = ($action === 'increase') ? $simple_qty : -$simple_qty;
                 $add_qty = $adjustment;
                 $reserved_stock = (int) get_post_meta($product_id, '_reserved_stock', true);
-                $current_stock = $product->get_stock_quantity();
+                $woo_current_stock = $product->get_stock_quantity();
+                if ($woo_current_stock >= 0) {
+                    $current_stock = $woo_current_stock;
+                } else {
+                    // Skip calculation or set a default value
+                    $current_stock = 0; // or null if you want to ignore
+                }
                 $new_stock =max(0, $current_stock + $adjustment);
             }
             

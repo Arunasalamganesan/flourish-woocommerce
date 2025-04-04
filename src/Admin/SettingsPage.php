@@ -44,13 +44,17 @@ class SettingsPage
                 // Disable re-scheduling by blocking the function call
                 add_filter('woocommerce_cleanup_draft_orders_interval', '__return_zero');
                 add_filter('woocommerce_delete_order_items', function($delete, $order_id) {
+                    // Check if order_id is provided
+                    if ($order_id === null) {
+                        return $delete;
+                    }
+                    
                     $order = wc_get_order($order_id);
-                    if ($order && $order->get_status() === 'wc-checkout-draft' || $order && $order->get_status() === 'auto-draft' ) {
+                    if ($order && ($order->get_status() === 'wc-checkout-draft' || $order->get_status() === 'auto-draft')) {
                         return false; // Prevent deletion of order items for draft orders
                     }
                     return $delete;
-                }, 10, 2);
-                
+                }, 10, 1);
                 
                 
             });  
@@ -235,12 +239,18 @@ class SettingsPage
         $item_sync_options = $this->existing_settings['item_sync_options'] ?? [];
         
         $reserved_stock = (int) get_post_meta($product_id, '_reserved_stock', true);
-        $woocommerce_stock = abs($inventory_quantity - $reserved_stock);
+        
+        if ($inventory_quantity >= 0) {
+            $woocommerce_stock = $inventory_quantity - $reserved_stock;
+        } else {
+            // Skip calculation or set a default value
+            $woocommerce_stock = 0; // or null if you want to ignore
+        }
         $product->set_stock_quantity($woocommerce_stock); 
         $product->save();
-        $flourish_items = new FlourishItems($items);
+       // $flourish_items = new FlourishItems($items);
         
-        $flourish_items->save_as_woocommerce_products($item_sync_options);
+        //$flourish_items->save_as_woocommerce_products($item_sync_options);
 
 
         if (is_wp_error($data)) {
@@ -642,8 +652,12 @@ class SettingsPage
                 <form method="post" id="handle-import-product-form">
                 <?php wp_nonce_field('flourish-woocommerce-plugin-import-products', 'import_nonce'); ?>
                 <input type="hidden" name="action" value="import_products">
-                <input type="submit" id="import-products" class="button button-primary" value="Import Products" <?php echo $import_products_button_active ? '' : 'disabled'; ?>>
+                <input type="submit" id="import-products" class="button button-primary" value="Initial Sync" <?php echo $import_products_button_active ? '' : 'disabled'; ?>>
                 </form>
+                <div class="flourish_setting_warn">
+                ⚠️ <strong style="font-size: 17px; text-transform: uppercase;">Warning:</strong> 
+                This will reset all product information and re-import items from Flourish. We recommend avoid clicking this after the initial import unless you expect to reset data.
+                </div> 
             </div>
         </div>
         <script>

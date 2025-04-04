@@ -156,4 +156,14 @@ input[type="date"] {
 }
 
 
-
+/* waring message show flourish settings page*/
+.flourish_setting_warn{background-color: #fff3cd;
+    border-left: 5px solid #dba617;
+    padding: 15px;
+    margin-top: 15px;
+    font-weight: normal;
+    color: #000000;
+    border-radius: 4px;
+    font-size: 16px;
+    line-height: 1.6;
+}

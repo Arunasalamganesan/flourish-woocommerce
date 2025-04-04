@@ -188,7 +188,12 @@ class FlourishItems
         $product_id = $wc_product->get_id();
         $reserved_stock = (int) get_post_meta($product_id, '_reserved_stock', true);
         $flourish_stock = $product['inventory_quantity'];
-        $woocommerce_stock = abs($flourish_stock - $reserved_stock);
+        if ($flourish_stock >= 0) {
+            $woocommerce_stock = abs($flourish_stock - $reserved_stock);
+        } else {
+            // Skip calculation or set a default value
+            $woocommerce_stock = 0; // or null if you want to ignore
+        }
         $wc_product->set_stock_quantity($woocommerce_stock); 
         // Save the product and get its ID
         $product_id = $wc_product->save(); // Persist changes to the database. 
