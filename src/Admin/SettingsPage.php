@@ -251,8 +251,10 @@ class SettingsPage
        // $flourish_items = new FlourishItems($items);
         
         //$flourish_items->save_as_woocommerce_products($item_sync_options);
-
-
+        //update reserve stock
+        $stock_info = $this->update_product_reserved_stock($product_id);
+        $available_reserved_stock_info = (int)$stock_info->total_reserved_stock;
+        update_post_meta($product_id, '_reserved_stock', $available_reserved_stock_info);
         if (is_wp_error($data)) {
             wp_send_json_error(['message' => 'Error fetching inventory']);
         }
@@ -260,6 +262,31 @@ class SettingsPage
         //$body = wp_remote_retrieve_body($response);
         wp_send_json_success(['message' => 'Inventory refreshed']);
     }
+    function update_product_reserved_stock($product_id) {
+        global $wpdb;
+    
+        $query = $wpdb->prepare(
+            "SELECT 
+                oim.meta_value AS product_id,
+                SUM(CAST(COALESCE(pm.meta_value, '0') AS DECIMAL(10,2))) AS total_reserved_stock
+            FROM 
+                {$wpdb->posts} p 
+                JOIN {$wpdb->prefix}woocommerce_order_items oli ON p.ID = oli.order_id 
+                JOIN {$wpdb->prefix}woocommerce_order_itemmeta oim ON oli.order_item_id = oim.order_item_id 
+                LEFT JOIN {$wpdb->postmeta} pm ON oli.order_item_id = pm.post_id AND pm.meta_key = '_reserved_stock'
+            WHERE 
+                p.post_type = 'shop_order' 
+                AND p.post_status = 'wc-checkout-draft' 
+                AND oim.meta_key = '_product_id' 
+                AND oim.meta_value = %d
+            GROUP BY 
+                oim.meta_value",
+            $product_id
+        );
+    
+       return $result = $wpdb->get_row($query);
+    }
+    
     //enqueue the style css page
     function flourish_woocommerce_plugin_enqueue_styles($hook_suffix) {
         // Check if we are on the correct settings page

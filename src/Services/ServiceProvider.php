@@ -1,18 +1,20 @@
 <?php
 
 namespace FlourishWooCommercePlugin\Services;
+use FlourishWooCommercePlugin\API\FlourishWebhook;
 use FlourishWooCommercePlugin\Admin\SettingsPage;
+use FlourishWooCommercePlugin\Admin\ProductCustomfields;
+use FlourishWooCommercePlugin\Admin\WoocommerceSettingsCustomFields;
 use FlourishWooCommercePlugin\CustomFields\FlourishOrderID;
 use FlourishWooCommercePlugin\CustomFields\License;
+use FlourishWooCommercePlugin\CustomFields\OutboundFrontend;
 use FlourishWooCommercePlugin\Handlers\HandlerOrdersOutbound;
 use FlourishWooCommercePlugin\Handlers\HandlerOrdersRetail;
 use FlourishWooCommercePlugin\Handlers\HandlerOrdersSyncNow;
-use FlourishWooCommercePlugin\API\FlourishWebhook;
-use FlourishWooCommercePlugin\Admin\ProductCustomfields;
-use FlourishWooCommercePlugin\Admin\WoocommerceSettingsCustomFields;
 use FlourishWooCommercePlugin\Handlers\HandlerOrdersCancel;
 use FlourishWooCommercePlugin\Handlers\HandlerOutboundUpdateCart;
 use FlourishWooCommercePlugin\Handlers\HandlerOutboundMultipleCart;
+ 
 
 class ServiceProvider
 {
@@ -52,10 +54,12 @@ class ServiceProvider
             (new HandlerOrdersRetail($this->settings))->register_hooks();
         } else {
             (new License($this->settings))->register_hooks();
+            (new OutboundFrontend())->register_hooks(); 
             (new WoocommerceSettingsCustomFields())->register_hooks(); 
             (new HandlerOrdersOutbound($this->settings))->register_hooks();            
             (new HandlerOutboundUpdateCart())->register_hooks(); 
             (new HandlerOutboundMultipleCart())->register_hooks();
+            
         }
     }
     
