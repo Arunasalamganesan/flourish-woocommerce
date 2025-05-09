@@ -28,7 +28,7 @@ class FlourishItems
         if (!count($this->items)) {
             throw new \Exception("No items to map.");
         }
-
+        
         return array_map([$this, 'map_flourish_item_to_woocommerce_product'], $this->items);
     }
 
@@ -48,15 +48,23 @@ class FlourishItems
             }
 
             $wc_product = $this->get_existing_or_new_product($product['sku'],$product['uom']);
-            $new_product = $wc_product->get_id() === 0;
+           // $new_product = $wc_product->get_id() === 0;
 
             // Update product attributes
             $product_id = $this->update_product_attributes($wc_product, $product, $item_sync_options);
 
+           
             // Assign category if applicable
-            if ($new_product || (!empty($item_sync_options['categories']) && !empty($product['item_category']))) {
+            if ((!empty($product['item_category']) )) {
                 $this->assign_product_category($product['item_category'], $product_id);
             }
+ 
+            // Assign brand if available
+            if (!empty($product['brand'])) {
+                error_log('Assigning brand: ' . $product['brand'] . ' to product ID: ' . $product_id);
+                $this->assign_product_brand($product['brand'], $product_id);
+            }
+
 
             // Trigger custom action after import
             do_action('flourish_item_imported', $product, $product_id);
@@ -77,21 +85,19 @@ class FlourishItems
      */
     private function get_existing_or_new_product($sku,$uom)
     {
+		 
         // Check for existing products by SKU
-        $existing_products = wc_get_products([
-            'sku' => $sku,
-            'limit' => 1,
-        ]);
-
-            
+       // $existing_products = wc_get_products([
+            //'sku' => $sku,
+            //'limit' => 1,
+       // ]);
+           
+		   $product_id=wc_get_product_id_by_sku($sku);            
             $attribute_exists = false;
-            $attribute_uom='';
-            
-             
+            $attribute_uom=''; 
          
-        if (!empty($existing_products)) {
-            $product = $existing_products[0];
-             
+        if (!empty($product_id)) {
+           $product = wc_get_product($product_id); // Get the full product object
 
             // Check if the existing product is a variable product
            if ($product->is_type('variable'))
@@ -499,6 +505,68 @@ class FlourishItems
         $wc_product->update_meta_data('flourish_item_id', $product['flourish_item_id']);
     }
 
+    /* Assign a brand to a product
+    * 
+    * @param string $brand Brand name
+    * @param int $product_id WooCommerce product ID
+    */
+    public function assign_product_brand($brand, $product_id) {
+        if (empty($brand) || empty($product_id)) {
+            error_log("Missing brand or product ID - Brand: {$brand}, Product ID: {$product_id}");
+            return false;
+        }
+        
+        // Use the correct taxonomy
+        $taxonomy = 'product_brand';
+        
+        // Check if the term exists (case-insensitive search)
+        $existing_terms = get_terms([
+            'taxonomy' => $taxonomy,
+            'hide_empty' => false,
+            'name__like' => $brand
+        ]);
+        
+        $term_id = null;
+        
+        // Look for an exact match (case-insensitive)
+        if (!empty($existing_terms)) {
+            foreach ($existing_terms as $existing_term) {
+                if (strtolower($existing_term->name) === strtolower($brand)) {
+                    $term_id = $existing_term->term_id;
+                    error_log("Found existing brand term with ID: {$term_id} for brand: {$brand}");
+                    break;
+                }
+            }
+        }
+        
+        // If no term found, create it
+        if (!$term_id) {
+            $term = wp_insert_term($brand, $taxonomy);
+            if (is_wp_error($term)) {
+                error_log('Error creating brand term: ' . $term->get_error_message());
+                return false;
+            }
+            $term_id = $term['term_id'];
+            error_log("Created new brand term with ID: {$term_id} for brand: {$brand}");
+        }
+        
+        // Clear existing brands and assign the new one
+        $result = wp_set_object_terms($product_id, array($term_id), $taxonomy, false);
+        
+        if (is_wp_error($result)) {
+            error_log('Error assigning brand term: ' . $result->get_error_message());
+            return false;
+        } else {
+            error_log("Successfully assigned brand term ID {$term_id} to product ID {$product_id}");
+        }
+        
+        // Clear cache
+        clean_object_term_cache($product_id, $taxonomy);
+        wp_cache_flush(); // More aggressive cache clearing
+        
+        return true;
+    }
+
     /**
      * Assign a category to the WooCommerce product.
      *
@@ -543,6 +611,7 @@ class FlourishItems
             'weight_uom' => $flourish_item['weight_uom'],
             'weight_uom_description' => $flourish_item['weight_uom_description'],            
             'inventory_quantity' => $flourish_item['inventory_quantity'],
+            'brand'=>$flourish_item['brand'],
         ];
     }
 }

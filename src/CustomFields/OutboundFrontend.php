@@ -39,10 +39,28 @@ class OutboundFrontend
 
         // Save approval status changes
         add_action('personal_options_update', [$this, 'save_approval_field']);
-        add_action('edit_user_profile_update', [$this, 'save_approval_field']);
+        add_action('edit_user_profile_update', [$this, 'save_approval_field']); 
+        
+        // Make sure WooCommerce validation messages are displayed
+        add_filter('woocommerce_register_form', [$this, 'add_form_validation_attributes']);
 
     }
-    
+    /**
+     * Add HTML5 validation attributes to WooCommerce registration form
+     */
+    public function add_form_validation_attributes() {
+        ?>
+        <script type="text/javascript">
+            jQuery(document).ready(function($) {
+                // Add required attribute to email field
+                $('#reg_email').attr('required', 'required');
+                
+                // Add required and maxlength attributes to password field
+                $('#reg_password').attr('required', 'required').attr('maxlength', '15');
+            });
+        </script>
+        <?php
+    }
     public function custom_woocommerce_register_fields()
     {
         ?>
