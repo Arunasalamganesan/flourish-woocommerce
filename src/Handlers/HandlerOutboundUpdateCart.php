@@ -247,7 +247,7 @@ class HandlerOutboundUpdateCart
                                         '<div id="already-in-cart-container">' +
                                             '<div class="woocommerce-notices-wrapper">' +
                                                 '<div class="woocommerce-message" role="alert" tabindex="-1">' +
-                                                    '<?php _e("Already item in Cart", "your-text-domain"); ?>' +
+                                                    '<?php _e("Item already in cart", "your-text-domain"); ?>' +
                                                     '<a href="<?php echo esc_url(wc_get_cart_url()); ?>" class="button wc-forward" id="view-cart-link" style="float:right;margin-left:30px;">' +
                                                         '<?php _e("View Cart", "your-text-domain"); ?>' +
                                                     '</a>' +
