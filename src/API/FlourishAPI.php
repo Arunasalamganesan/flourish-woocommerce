@@ -452,6 +452,55 @@ class FlourishAPI
         } 
         return false;
     }
+    public function fetch_destination_by_destination_id($destination_id)
+    {
+        $destination_value = $destination_id;
+        $api_url = $this->url . "/external/api/v1/destinations/" . urlencode($destination_value);
+
+        $headers = [
+            'Authorization: Basic ' . $this->auth_header,
+        ];
+
+        // Use the HttpRequestHelper for the API call
+        try
+        {
+         $response_http = HttpRequestHelper::make_request($api_url, 'GET', $headers);
+         $response_data = HttpRequestHelper::validate_response($response_http);
+        } catch (\Exception $e) {
+            throw new \Exception("Error fetching destination by destination_id: " . $e->getMessage());
+        }
+
+        if (isset($response_data['data']) && is_array($response_data['data']) && count($response_data['data'])) {
+        // Return all destinations instead of just the first one
+        return $response_data['data'];
+        }
+        return false;
+    }
+
+    public function fetch_destination_by_facility_name()
+    {
+       
+        $api_url = $this->url . "/external/api/v1/destinations";
+
+        $headers = [
+            'Authorization: Basic ' . $this->auth_header,
+        ];
+
+        // Use the HttpRequestHelper for the API call
+        try
+        {
+         $response_http = HttpRequestHelper::make_request($api_url, 'GET', $headers);
+         $response_data = HttpRequestHelper::validate_response($response_http);
+        } catch (\Exception $e) {
+            throw new \Exception("Error fetching destination by facility_name: " . $e->getMessage());
+        }
+
+        if (isset($response_data['data']) && is_array($response_data['data']) && count($response_data['data'])) {
+        // Return all destinations instead of just the first one
+        return $response_data['data'];
+        }
+        return false;
+    }
 
     public function fetch_uoms()
     {
@@ -492,6 +541,48 @@ class FlourishAPI
 
         return $uoms;
    }
+ 
+
+    // Helper method to get destination options
+    public function get_destination_options() {
+    // Initialize API
+    // You can use the same logic from your existing code to generate this
+    $destinations = $this->fetch_destination_by_facility_name();
+    $destination_options = [];
+    
+    if ($destinations && is_array($destinations)) {
+        // Prepare array for sorting
+         // Prepare array for sorting
+    $temp_array = [];
+    foreach ($destinations as $destination) {
+        $id = $destination['id'];
+        // Use name instead of alias since alias is empty
+        // Check if alias is empty, use name as fallback
+        $name = !empty($destination['alias']) ? $destination['alias'] : $destination['name'];
+        $license_number = !empty($destination['license_number']) ? $destination['license_number'] : 'No License';
+        // Format: "Name - License"
+        $display_text = $name . ' (' . $license_number . ')';
+        $temp_array[] = [
+            'id' => $id,
+            'display_text' => $display_text,
+            'sort_key' => $name // Use name for sorting
+        ];
+    }
+        
+        // Sort the array by name (alphanumerically)
+        usort($temp_array, function($a, $b) {
+            return strnatcasecmp($a['sort_key'], $b['sort_key']);
+        });
+        
+        // Build the final associative array
+        foreach ($temp_array as $item) {
+            $destination_options[$item['id']] = $item['display_text'];
+        }
+    }
+    
+    return $destination_options;
+}
+
    /**
      * Get the order by id.
      */

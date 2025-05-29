@@ -5,6 +5,7 @@ use FlourishWooCommercePlugin\API\FlourishWebhook;
 use FlourishWooCommercePlugin\Admin\SettingsPage;
 use FlourishWooCommercePlugin\Admin\ProductCustomfields;
 use FlourishWooCommercePlugin\Admin\WoocommerceSettingsCustomFields;
+use FlourishWooCommercePlugin\Admin\WoocommerceOutboundSettings;
 use FlourishWooCommercePlugin\CustomFields\FlourishOrderID;
 use FlourishWooCommercePlugin\CustomFields\License;
 use FlourishWooCommercePlugin\CustomFields\OutboundFrontend;
@@ -14,6 +15,7 @@ use FlourishWooCommercePlugin\Handlers\HandlerOrdersSyncNow;
 use FlourishWooCommercePlugin\Handlers\HandlerOrdersCancel;
 use FlourishWooCommercePlugin\Handlers\HandlerOutboundUpdateCart;
 use FlourishWooCommercePlugin\Handlers\HandlerOutboundMultipleCart;
+ 
  
 
 class ServiceProvider
@@ -54,6 +56,7 @@ class ServiceProvider
             (new HandlerOrdersRetail($this->settings))->register_hooks();
         } else {
             (new License($this->settings))->register_hooks();
+            (new WoocommerceOutboundSettings($this->settings))->register_hooks();
             (new OutboundFrontend())->register_hooks(); 
             (new WoocommerceSettingsCustomFields())->register_hooks(); 
             (new HandlerOrdersOutbound($this->settings))->register_hooks();            

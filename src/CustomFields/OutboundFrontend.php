@@ -92,7 +92,8 @@ class OutboundFrontend
         <p class="form-row">
             <label for="license"><?php _e('License Number(s)', 'woocommerce'); ?> <span class="required">*</span></label>
             <textarea name="license" id="license" rows="2" style="width: 100%;" placeholder="Enter your License Number(s)..."><?php if (!empty($_POST['license'])) echo esc_textarea($_POST['license']); ?></textarea>
-			<b>Note: </b>You can enter multiple license numbers separated by commas. Example: ABC-12345,DEF-67890 
+			<b>Note: </b>You can enter multiple license numbers separated by commas. Example: ABC-12345,DEF-67890
+If you don't have any license number, please type <b>no license number</b> in the box. 
 
         </p>
          <?php
@@ -175,12 +176,15 @@ class OutboundFrontend
      */
     public function save_custom_fields_and_notify_admin($customer_id) 
     {
+
+
         // Save all custom fields to user meta
         $fields_to_save = ['first_name', 'last_name', 'job_title', 'company_name', 'phone', 'license'];
         
         foreach ($fields_to_save as $field) {
 			if ($field === 'license') {
 				$licenses = explode(',', $_POST[$field]); // Split by comma
+                
 				update_user_meta($customer_id, $field, array_map('trim', $licenses));
 			} else {
 				update_user_meta($customer_id, $field, sanitize_text_field($_POST[$field]));

@@ -134,10 +134,10 @@ class HandlerOrdersSyncNow
                     $destination = HandlerOrdersOutbound::create_destination_object($wc_order, $billing_address);
 
                     // Check for an existing destination in Flourish.
-                    $existing_destination = $flourish_api->fetch_destination_by_license($destination['license_number']);
-                    if ($existing_destination) {
-                        $destination['id'] = $existing_destination['id'];
-                    }
+                   // $existing_destination = $flourish_api->fetch_destination_by_license($destination['license_number']);
+                   // if ($existing_destination) {
+                        //$destination['id'] = $existing_destination['id'];
+                   // }
                     // Loop through order items and sync them with Flourish
                     $order_lines = HandlerOrdersOutbound::get_order_lines($wc_order,"update");
 
@@ -539,10 +539,10 @@ class HandlerOrdersSyncNow
             $destination = HandlerOrdersOutbound::create_destination_object($wc_order, $billing_address);
 
             // Check for an existing destination in Flourish.
-            $existing_destination = $flourish_api->fetch_destination_by_license($destination['license_number']);
-            if ($existing_destination) {
-                $destination['id'] = $existing_destination['id'];
-            }
+           // $existing_destination = $flourish_api->fetch_destination_by_license($destination['license_number']);
+           // if ($existing_destination) {
+                //$destination['id'] = $existing_destination['id'];
+            //}
 
             // Generate order lines.
             $order_lines = HandlerOrdersOutbound::get_order_lines($wc_order,"create");
@@ -632,10 +632,10 @@ class HandlerOrdersSyncNow
             $destination = HandlerOrdersOutbound::create_destination_object($wc_order, $billing_address);
 
             // Check for an existing destination in Flourish.
-            $existing_destination = $flourish_api->fetch_destination_by_license($destination['license_number']);
-            if ($existing_destination) {
-                $destination['id'] = $existing_destination['id'];
-            }
+           // $existing_destination = $flourish_api->fetch_destination_by_license($destination['license_number']);
+            //if ($existing_destination) {
+               //$destination['id'] = $existing_destination['id'];
+            //}
 
             $order = [
                 'original_order_id' => (string) $wc_order->get_id(),

@@ -180,10 +180,10 @@ class HandlerOrdersCancel
             $destination = HandlerOrdersOutbound::create_destination_object($wc_order, $billing_address);
 
             // Check for an existing destination in Flourish.
-            $existing_destination = $flourish_api->fetch_destination_by_license($destination['license_number']);
-            if ($existing_destination) {
-                $destination['id'] = $existing_destination['id'];
-            }
+            //$existing_destination = $flourish_api->fetch_destination_by_license($destination['license_number']);
+           // if ($existing_destination) {
+              //  $destination['id'] = $existing_destination['id'];
+           // }
             
             $order = [
                 'original_order_id' => (string)$wc_order->get_id(),

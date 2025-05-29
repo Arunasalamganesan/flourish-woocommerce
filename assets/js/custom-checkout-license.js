@@ -160,15 +160,36 @@ function waitForPlaceOrderButton() {
 }
 
 // Start polling when the DOM is loaded
-document.addEventListener('DOMContentLoaded', waitForBillingFieldsContainer);
+//document.addEventListener('DOMContentLoaded', waitForBillingFieldsContainer);
   
-
-jQuery(function ($) { 
-   // $('.woocommerce-billing-fields .form-row label, #shipping .form-row label').hide();
-    setButtonState('woocommerce_checkout_place_order', false); 
-function handleShipAddressFromLicense(licenseValue) {
-    if (!licenseValue) {
-        alert('Please select a license.');
+jQuery(document).ready(function($) {
+     // Initialize Select2 for destination field 
+        $('#destination').select2({ 
+            placeholder: 'Search for a destination...', 
+            allowClear: true, 
+            width: '100%',
+        }); 
+         
+        // Add validation to checkout process 
+        $('form.checkout').on('checkout_place_order', function() { 
+            if ($('#destination').val() === '') { 
+                // Show error message 
+                if (!$('#destination_field .woocommerce-error').length) { 
+                    $('#destination_field').append('<div class="woocommerce-error">' +  
+                        'Please select a destination' +  
+                        '</div>'); 
+                } 
+                 setButtonState('woocommerce_checkout_place_order', false);
+                return false; 
+            } 
+            return true; 
+        }); 
+  
+  
+function handleShipAddressFromLicense(destinationValue) {
+   
+    if (!destinationValue) {
+        alert('Please select atleast one.');
         return;
     }
 
@@ -183,9 +204,9 @@ function handleShipAddressFromLicense(licenseValue) {
     const data = {
         action: 'ship_destination_from_flourish',
         nonce: nonce,
-        license: licenseValue,
+        destination: destinationValue,
     };
-
+ 
     $.ajax({
         url: licenseData.ajax_url,
         method: 'POST',
@@ -195,12 +216,12 @@ function handleShipAddressFromLicense(licenseValue) {
             setButtonState('woocommerce_checkout_place_order', false); 
             $('#loading_overlay').show(); // Show loading message or spinner
         },
-        success: function (response) { 
+        success: function (response) {  
             if (response.success) {
                  const destination = response.data.data; 
                   const billing = response.data.data.billing; 
-
                 $('#billing_company').val(destination.name || ''); 
+                $('#license').val(destination.license_number || ''); 
                 $('#billing_country').val(billing.country || '');  
                 $('#billing_address_1').val(billing.address_line_1 || '');   
                 $('#billing_address_2').val(billing.address_line_2 || '');   
@@ -218,7 +239,6 @@ function handleShipAddressFromLicense(licenseValue) {
                 $('#shipping_postcode').val(destination.zip_code || '');
                 $('#shipping_state').val(destination.state || '');  
                 $('#shipping_phone').val(destination.company_phone_number || ''); 
-                
                 setButtonState('woocommerce_checkout_place_order', true);               
             } else {
                 $('#loading_overlay').hide();
@@ -249,16 +269,17 @@ function handleShipAddressFromLicense(licenseValue) {
 }  
 
 // Trigger this function when the license dropdown value changes
-$('#license').on('change', function () {
+$('#destination').on('change', function () {
     const selectedLicense = $(this).val();
     if (selectedLicense) {
         handleShipAddressFromLicense(selectedLicense);
     } else {
-        alert('Please select a valid license.');
+        alert('Please select a destination name.');
     }
 });
 
 function setButtonState(buttonName, isEnabled) {
+    console.log(buttonName+isEnabled);
     $(`button[name="${buttonName}"]`).prop('disabled', !isEnabled);
 }
  
